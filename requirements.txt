@@ -1,67 +1,24 @@
-# ── Core framework ─────────────────────────────────────────────────────────────
+flask>=3.0.0
+flask-socketio>=5.3.0
 paramiko>=3.0.0
 pyserial>=3.5
 requests>=2.28.0
-flask>=3.0.0
-flask-socketio>=5.3.0
-
-# ── USB device detection (libusb-only devices) ─────────────────────────────────
 pyusb>=1.2.1
-
-# ── ESP32 firmware flashing (LilyGo T-Zigbee, LoRa32, Heltec, WiFi Duck) ──────
 esptool>=4.7.0
 mpremote>=1.22.0
-
-# ── Flipper Zero ───────────────────────────────────────────────────────────────
 pyflipper>=0.2.0
 flipperzero-protobuf>=0.8.0
-
-# ── HackRF One ─────────────────────────────────────────────────────────────────
-# System dep required: brew install hackrf  (macOS)
-#                      apt install hackrf   (Linux)
 pyhackrf>=2024.2
-
-# ── Sonoff ZBDongle-E (EFR32MG21 / EZSP Zigbee coordinator) ───────────────────
 bellows>=0.36.0
 zigpy>=0.60.0
 universal-silabs-flasher>=0.0.17
-
-# ── LilyGo T-Zigbee ZNP coordinator (TI CC2652P variant) ──────────────────────
 zigpy-znp>=0.11.0
-
-# ── Cynthion / GreatFET / Facedancer ──────────────────────────────────────────
 cynthion>=1.0.0
 apollo-fpga>=1.0.0
 facedancer>=3.1.2
 greatfet>=2021.2.1
-
-# ── Debug probes — STM32 (ST-Link V2 / Nucleo) ────────────────────────────────
 pyocd>=0.36.0
-
-# ── Debug probes — J-Link EDU Mini ────────────────────────────────────────────
-# System dep required: SEGGER J-Link Software (https://www.segger.com/downloads/jlink/)
-# macOS: brew install --cask segger-jlink
 pylink-square>=1.0.0
-
-# ── Yardstick One / rfcat ─────────────────────────────────────────────────────
-# Note: Install from git for Python 3 support:
-#   pip install git+https://github.com/atlas0fd00m/rfcat.git
-# rfcat  # uncomment if PyPI version is sufficient
-
-# ── Ubertooth One ─────────────────────────────────────────────────────────────
-# System dep required: brew install ubertooth (macOS)
-#                      compile from source (Linux)
-# Python: only scapy for PCAP parsing
 scapy>=2.5.0
-
-# ── WiFi Duck WebSocket control ────────────────────────────────────────────────
 websocket-client>=1.6.0
-
-# ── Proxmark3 Iceman ───────────────────────────────────────────────────────────
-# System dep required: brew install proxmark3 (macOS)
-#                      compile from source (Linux)
-# No pip package needed — pm3 binary only
-
-# ── ST-Link CLI tools ─────────────────────────────────────────────────────────
-# System dep: brew install stlink (macOS) / apt install stlink-tools (Linux)
-# No pip package needed — st-flash binary only
+eventlet>=0.35.0
