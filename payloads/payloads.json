@@ -1,0 +1,783 @@
+{
+  "bash_bunny": [
+    {
+      "name": "Cross-Platform OS Enum (Device + User + Network)",
+      "description": "ATTACKMODE HID STORAGE payload that auto-detects Windows, macOS, and Linux targets. Stages enum_win.ps1 and enum_unix.sh onto the Bunny's udisk partition, then injects keystrokes to launch each script in a hidden window (RUN WIN for Windows, CMD+Space for macOS, CTRL+ALT+T for Linux). Polls for a loot/.done sentinel file for up to 90 seconds, then copies results to /loot/cross-platform-enum/ on the device. Captures: hostname, OS version, current user + groups, installed software, running processes, network interfaces/routes/ARP, open ports, and scheduled tasks/cron jobs.",
+      "path": "payloads/bash_bunny/cross-platform-enum/payload.txt",
+      "added": "2026-03-22T00:00:00Z"
+    },
+    {
+      "name": "Ethernet Mode",
+      "description": "Minimal one-liner payload that sets ATTACKMODE ECM_ETHERNET and CLIENT, placing the Bash Bunny into transparent Ethernet gadget mode. Useful as a base for network-pivoting payloads or as a standalone implant to provide an out-of-band Ethernet interface to the target host. No HID injection — purely a network mode enabler.",
+      "path": "payloads/bash_bunny/ethernet-mode/payload.txt",
+      "added": "2026-03-22T00:00:00Z"
+    },
+    {
+      "name": "Keyboard USB Identity Spoof Test (100 VID/PID identities)",
+      "description": "Iterates through 100 real-world keyboard VID/PID pairs spanning Apple, Microsoft, Logitech, Razer, Corsair, SteelSeries, Ducky, ASUS ROG, Keychron, Dell, HP, Cherry, Lite-On, Mad Catz, Kinesis, HyperX, Cooler Master, Vortex, ZSA, Topre, Glorious, and Generic identities. For each identity, sets ATTACKMODE HID STORAGE with the corresponding VID/PID, runs a kbtest helper to confirm keystrokes are accepted, and logs SUCCESS or TIMEOUT to summary.txt. Full run takes approximately 15-20 minutes. Used to determine which USB keyboard identities bypass endpoint DLP or device allowlisting policies.",
+      "path": "payloads/bash_bunny/keyboard-id-spoof-test/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit Target Audit",
+      "description": "ATTACKMODE HID RNDIS payload that spins up a Python HTTP server on port 80 of the Bunny's RNDIS interface. The GET handler serves SysAudit.ps1 and a runner.ps1 wrapper; the POST /upload endpoint saves the returned ZIP. Injects Win+R, then CTRL+SHIFT+ENTER to launch an elevated PowerShell prompt, accepts the UAC dialog with ALT+Y, and types a one-liner that downloads and executes runner.ps1. Polls for audit_results.zip in /loot/ for up to 5 minutes. Captures a 7-section system audit covering OS config, users/groups, network, installed software, running services, scheduled tasks, and security settings.",
+      "path": "payloads/bash_bunny/sysaudit-target-audit/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Passive Network Capture",
+      "description": "ATTACKMODE RNDIS-only payload (no HID) that enables IP forwarding and sets up iptables NAT to transparently pass all target traffic through the Bunny. Launches 4 parallel tcpdump processes: full traffic PCAP, LLMNR/NBT-NS/mDNS traffic only, cleartext protocol traffic (FTP/Telnet/SMTP/POP3/IMAP/HTTP), and DNS queries. Default capture duration is 300 seconds. Post-capture processing extracts: dns_queries.txt, http_hosts.txt, http_basic_auth.txt (base64-decoded), and llmnr_hostnames.txt. Produces a loot summary with byte counts per file.",
+      "path": "payloads/bash_bunny/passive-network-capture/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PrivescAudit Windows (HID + RNDIS exfil)",
+      "description": "ATTACKMODE HID RNDIS payload targeting Windows 10/11. Serves PrivescAudit-Windows.ps1 and a runner wrapper over the Bunny's RNDIS HTTP server. Injects a single-quoted PowerShell command (to avoid shell expansion of dollar signs in the typed string) that downloads runner.ps1 to C:\\Windows\\Temp\\pea_runner.ps1 and executes it. Polls /loot/privesc-windows-audit/ for privesc_audit.zip for up to 300 seconds. The audit checks: token privileges, unquoted service paths, writable service binaries, AlwaysInstallElevated registry keys, UAC bypass vectors, modifiable scheduled tasks, DLL hijack opportunities, and weak ACLs on privileged paths.",
+      "path": "payloads/bash_bunny/privesc-windows-audit/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "usb_rubber_ducky": [
+    {
+      "name": "SysAudit Windows Audit",
+      "description": "DuckyScript 3.0 payload for the USB Rubber Ducky (2022). Uses PASSIVE_WINDOWS_DETECT to wait for a fully booted Windows desktop, then injects Win+R to open the Run dialog. Runs a PowerShell one-liner (hidden window, execution policy bypass) that downloads SysAudit.ps1 from a configurable $SERVER:$PORT, executes it, and POSTs the results back to /upload. Includes JITTER_ENABLED TRUE with JITTER_MAX 30ms for natural keystroke timing. Must be compiled to inject.bin with Payload Studio before deployment on the Ducky.",
+      "path": "payloads/usb_rubber_ducky/sysaudit-windows-audit/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PrivescAudit Windows Quick (UAC elevation + PS stager)",
+      "description": "DuckyScript 3.0 payload for the USB Rubber Ducky (2022). Uses PASSIVE_WINDOWS_DETECT, then injects CTRL+SHIFT+ENTER after Win+R to request elevation, accepts UAC with ALT+Y. Downloads PrivescAudit-Windows.ps1 from $SERVER:$PORT and executes it in an elevated hidden PowerShell session. Includes a 120-second DELAY after injection to allow the audit to complete before typing 'exit'. JITTER_ENABLED TRUE with JITTER_MAX 30ms. Must be compiled to inject.bin with Payload Studio before deployment.",
+      "path": "payloads/usb_rubber_ducky/privesc-windows-quick/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "wifi_pineapple": [
+    {
+      "name": "WiFi Survey Passive (2.4+5GHz monitor, PCAP, AP/client CSV)",
+      "description": "Shell script for the WiFi Pineapple MK7. Puts wlan0 into monitor mode and starts a tcpdump capturing 802.11 management frames to a PCAP file. Channel-hops across all 2.4 GHz channels (1-13) and 5 GHz channels (36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 149, 153, 157, 161, 165) at a 3-second dwell per channel. Runs iw scan passively every 20 seconds and writes results to iw_scan.tsv. After capture, tshark post-processing produces: access_points.csv (BSSID, SSID, channel, signal), probe_requests.csv (client MAC, requested SSID), eapol_frames.csv (BSSID, client MAC, handshake stage), and hidden_ssids.txt (BSSIDs broadcasting empty SSIDs). Restores wlan0 to managed mode on exit.",
+      "path": "payloads/wifi_pineapple/wifi-survey/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "shark_jack": [
+    {
+      "name": "Network Recon Full (ARP, nmap, SMB, SNMP, DNS)",
+      "description": "Shark Jack payload that waits 5 seconds for DHCP, then performs a layered network reconnaissance. Writes host_info.txt with interface details and default gateway. Runs an ARP scan (arp-scan if available, otherwise nmap -sn) to enumerate live hosts. For each discovered host, runs nmap -sV --open against common ports with the banner script. Performs SMB null session enumeration (smb-security-mode, smb2-security-mode). Tests SNMP with 4 community strings (public, private, community, snmp). Attempts DNS reverse lookups and zone transfers against any discovered DNS servers. All results written to /root/loot/ with timestamps.",
+      "path": "payloads/shark_jack/network-recon-full/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Metasploit Import (SCP loot, db_import nmap XML, msfconsole)",
+      "description": "Operator-side integration script run from the attack workstation after a Shark Jack engagement. SSHes to the Shark Jack to verify connectivity, then SCPs the entire /root/loot/ directory to the local workstation. Searches the downloaded loot for all *.xml and *.gnmap nmap output files. Generates a Metasploit resource script (.rc) containing db_import commands for each file plus hosts, services, and vulns commands for a post-import summary. Launches msfconsole with the generated RC file. Requires the Shark Jack to be reachable at its default IP and Metasploit to have an active database connection.",
+      "path": "payloads/shark_jack/msf-import-sharkjack.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "packet_squirrel": [
+    {
+      "name": "Full Capture Timed (rotating PCAP, configurable duration)",
+      "description": "Packet Squirrel payload that uses tcpdump with -G (rotate interval in seconds) and -W (max file count) to capture all traffic in rotating PCAP files. Default configuration captures for 600 seconds total with 120-second rotation windows producing up to 10 files. Writes all PCAPs to /root/loot/ with timestamps. On completion, prints the number of PCAP files captured and total disk usage. Suitable for long-term passive collection where storage is constrained.",
+      "path": "payloads/packet_squirrel/full-capture-timed/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Credential Sniff Passive (cleartext protocols, live grep hits)",
+      "description": "Packet Squirrel payload that runs parallel capture streams: a full PCAP for offline analysis and a live ASCII-mode tcpdump piped through grep for immediate credential hits. Live grep patterns include: USER, PASS, LOGIN, AUTH, Authorization: Basic (with base64 decode), MAIL FROM, RCPT TO, BIND DN, password=, and username=. Each hit is timestamped and written to creds_live.txt. Protocols covered: FTP, Telnet, SMTP, POP3, IMAP, HTTP Basic auth, and LDAP simple bind. Runs indefinitely until interrupted.",
+      "path": "payloads/packet_squirrel/credsniff-passive/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "OpenVPN Tunnel (transparent gateway, SOCKS5 pivot, target capture)",
+      "description": "Packet Squirrel payload that establishes an OpenVPN tunnel to a remote C2 server, then configures the device as a transparent network gateway. Launches openvpn --daemon and waits up to 30 seconds for the tun0 interface to come up. Removes the default route, re-adds it via the VPN gateway, and sets up iptables NAT masquerading from the LAN-facing interface to tun0. Simultaneously runs tcpdump on the target PCAP to capture all traffic passing through the implant. Provides full network pivot capability: the operator gains access to the target LAN segment through the VPN tunnel while all target traffic is captured.",
+      "path": "payloads/packet_squirrel/openvpn-tunnel/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "lan_turtle": [
+    {
+      "name": "AutoSSH Reverse Tunnel (persistent reverse SSH, optional SOCKS5)",
+      "description": "LAN Turtle module start script that reads configuration from /etc/turtle/modules/autossh-reverse/config (C2_HOST, C2_PORT, C2_USER, SSH_KEY_PATH, optional SOCKS_PORT). Requires a pre-deployed ed25519 key pair for authentication. Launches autossh with -M 0 (no monitoring port) and -f -N -R ${C2_PORT}:localhost:22 to create a persistent reverse SSH tunnel back to the C2 server. If SOCKS_PORT is configured, adds -D ${SOCKS_PORT} for a SOCKS5 proxy over the same tunnel. Sets AUTOSSH_POLL=30 and AUTOSSH_GATETIME=0 for aggressive reconnect behavior. Writes a PID file and logs connection events. Provides persistent remote access to the target network through NAT/firewall.",
+      "path": "payloads/lan_turtle/autossh-reverse/start",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Responder LLMNR/NBT-NS Poisoning (SSH launch, live log tail, hash exfil)",
+      "description": "Operator-side integration script that SSHes to the LAN Turtle to launch and monitor a Responder session. Auto-detects the Responder.py path on the device, kills any existing Responder process, then launches Responder with -wrf -v flags via nohup in the background on the Turtle. Tails the live Responder log remotely over SSH for a configurable DURATION (default 300s) using timeout. After the capture window, SCPs the full Responder logs directory and the combined log file to the local workstation. Parses the logs to summarize NTLMv2 hash captures by username and prints a ready-to-run hashcat command (-m 5600) for offline cracking. Requires SSH key access to the LAN Turtle at its configured IP.",
+      "path": "payloads/lan_turtle/responder-lan-turtle.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "key_croc": [
+    {
+      "name": "Keylog Credential Harvest (MATCH patterns, Win+R PS stager)",
+      "description": "Key Croc payload using MATCH triggers to intercept credentials typed at the keyboard. Matches regex patterns for: /[Pp]assword/, /[Pp]ass(wd|word|phrase)/, /\\bsu(do)? /, /ssh .+@/, and /mysql.*-p/ to capture authentication attempts in real-time. On detection of a [[Windows+r]] sequence (Run dialog), injects a PowerShell stager from winr_ps_stager.txt to escalate the access opportunity. Also monitors for [[ctrl+alt+delete]] (Windows lock screen) and the string 'KeePass' (password manager launch). All captured keystrokes and MATCH events are logged to the Key Croc's loot directory with timestamps.",
+      "path": "payloads/key_croc/keylog-credential-harvest/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "signal_owl": [
+    {
+      "name": "WiFi Survey Passive (monitor mode, channel hop, PCAP + CSV)",
+      "description": "Signal Owl payload with LED stage indicators (SETUP/ATTACK/FINISH). Puts wlan0 into monitor mode and starts tcpdump capturing 802.11 management frame types to a PCAP. Channel-hops across 2.4 GHz (channels 1-13) and 5 GHz (channels 36-165 standard UNII bands) at a 2-second dwell per channel. Runs iw scan passively every 30 seconds and writes raw output to networks_raw.tsv. Post-capture tshark processing produces: networks.csv (BSSID, SSID, channel, signal strength), probe_requests.csv (client MAC, requested SSID, timestamp), eapol_frames.csv (BSSID, client MAC, handshake frame number), plus a deauth frame count. Restores wlan0 to managed mode on script exit.",
+      "path": "payloads/signal_owl/wifi-survey-passive/payload.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "screen_crab": [
+    {
+      "name": "Motion Login Capture (native res, motion trigger, Q=92)",
+      "description": "Screen Crab INI configuration for login credential capture. Trigger mode: NATIVE (native resolution passthrough). Capture mode: motion-triggered (SENS=8, high sensitivity). JPEG quality: Q=92 (high fidelity for text legibility). Recommended storage: 8GB microSD. Captures a screenshot each time motion is detected in the video signal, targeting login prompts, password entry, and screen unlock events. High quality setting ensures typed credentials in password fields and usernames are legible in captured images.",
+      "path": "payloads/screen_crab/motion-login/config.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Interval Monitor (720p, 30s interval, continuous)",
+      "description": "Screen Crab INI configuration for continuous interval-based screen monitoring. Resolution: 720p downscale. Capture mode: timed interval, one screenshot every 30 seconds. JPEG quality: Q=75 (balanced quality/size). Recommended storage: 16GB microSD. Suitable for monitoring workstation activity over extended periods such as a full business day. 30-second intervals provide good coverage of screen content changes (document edits, web browsing, application use) without excessive storage consumption.",
+      "path": "payloads/screen_crab/interval-monitor/config.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Video Session Capture (720p video, motion trigger, 60s clips)",
+      "description": "Screen Crab INI configuration for video clip capture of active sessions. Resolution: 720p. Capture mode: motion-triggered video recording, 60-second clips per trigger. Motion sensitivity: SENS=5 (medium, reduces false triggers from screensavers). Recommended storage: 50GB microSD. Each motion event produces a 60-second MP4/H.264 clip. Suitable for capturing complete user sessions including typing sequences, application navigation, and screen content in full motion context rather than static screenshots.",
+      "path": "payloads/screen_crab/video-session/config.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Stealth Slow (720p, 2min interval, long-term implant, ~1GB/day)",
+      "description": "Screen Crab INI configuration optimized for long-term covert implant deployment. Resolution: 720p. Capture mode: timed interval, one screenshot every 120 seconds. JPEG quality: Q=60 (compressed for storage efficiency). Recommended storage: 32GB microSD (~1GB/day consumption at this rate). Designed for multi-week physical implant scenarios where the device will not be retrieved frequently. Low capture rate and compressed quality minimize storage footprint while still documenting screen activity at a cadence useful for reconstructing user behavior and accessing displayed content.",
+      "path": "payloads/screen_crab/stealth-slow/config.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "plunder_bug": [
+    {
+      "name": "Full Capture (all traffic, OUI auto-detect, timed or indefinite)",
+      "description": "Host-side bash capture script for the Plunder Bug. Auto-detects the Plunder Bug's tap interface by scanning /sys/class/net/*/address for the device OUI prefix 00:13:37. Supports two modes: timed capture (tcpdump -G rotation) or indefinite capture. Installs a cleanup trap on SIGINT/EXIT that prints total capture size and analysis hints (tshark filters for common protocols). Writes all traffic to a timestamped PCAP in the output directory. Suitable as a general-purpose baseline capture for subsequent offline analysis with Wireshark or tshark.",
+      "path": "payloads/plunder_bug/capture-full/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Passive Mode (iptables DROP + ip addr flush, silent tap)",
+      "description": "Host-side bash script that configures the Plunder Bug interface for completely silent passive operation. Supports three modes via argument: 'enable' (adds iptables DROP OUTPUT rule for the tap interface + ip addr flush to remove the host IP + disables IPv6 SLAAC/RA acceptance), 'disable' (removes the iptables rule and restores interface), and 'capture' (runs tcpdump on the silenced interface). The enable mode ensures the host generates zero traffic on the tapped segment — no ARP, no IPv6 RA responses, no IP-level communication — making the tap undetectable from the network perspective.",
+      "path": "payloads/plunder_bug/capture-passive/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "DNS Capture (port 53, live tshark decode, unique domain list)",
+      "description": "Host-side bash capture script targeting DNS traffic on the Plunder Bug tap interface. Runs tcpdump filtering port 53 to a PCAP while simultaneously running a live tshark decode stream using dns.flags.response==0 to display outbound query names in real time. Post-capture processing produces unique_domains.txt (deduplicated list of all queried FQDNs sorted by frequency) and internal_domains.txt (queries containing corp, internal, local, intranet, lan, ad., or dc. — indicating Active Directory and internal DNS infrastructure). Useful for passive network reconnaissance and internal naming convention discovery.",
+      "path": "payloads/plunder_bug/capture-dns/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Credential Capture (FTP/Telnet/SMTP/POP3/IMAP/HTTP, live grep + tshark decode)",
+      "description": "Host-side bash capture script targeting cleartext credentials on the Plunder Bug tap interface. Runs parallel streams: a full PCAP for offline analysis and a live ASCII tcpdump piped through grep for immediate hits on USER, PASS, LOGIN, AUTH, and Authorization: Basic patterns. Post-capture tshark processing produces: ftp_creds.txt (FTP USER/PASS sequences), http_basic_auth.txt (HTTP Authorization: Basic headers with base64-decoded credentials), and smtp_auth.txt (SMTP AUTH LOGIN/PLAIN sequences). Protocols covered: FTP (21), Telnet (23), SMTP (25/587), POP3 (110), IMAP (143), HTTP (80/8080/8000).",
+      "path": "payloads/plunder_bug/capture-creds/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "VoIP Capture (SIP 5060/5061, RTP 10000-20000, Digest auth extraction)",
+      "description": "Host-side bash capture script targeting VoIP traffic on the Plunder Bug tap interface. Captures SIP signaling on ports 5060 and 5061 (SIP-TLS) and RTP media streams on the standard 10000-20000 port range. Post-capture tshark processing extracts SIP Digest authentication headers (realm, nonce, response) for offline hash cracking, and produces a SIP call summary (caller, callee, call duration, response codes). The RTP streams can be decoded with Wireshark's 'Telephony > RTP > Stream Analysis' for call recording. Useful for VoIP infrastructure security assessments.",
+      "path": "payloads/plunder_bug/capture-voip/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "ICS/SCADA Capture (Modbus/DNP3/EtherNet-IP/BACnet/Profinet asset inventory)",
+      "description": "Host-side bash capture script for industrial control system protocol analysis on the Plunder Bug tap interface. Captures traffic filtered for ICS protocol ports: Modbus TCP (502), DNP3 (20000), EtherNet/IP (44818 + UDP 2222), BACnet/IP (UDP 47808), and Profinet (UDP 34964). Post-capture tshark dissection produces an asset inventory listing device IPs, protocol types, function codes observed, and unique device identifiers (DNP3 source addresses, EtherNet/IP identities). Suitable for passive OT network mapping without generating any probe traffic that could affect PLCs or safety systems.",
+      "path": "payloads/plunder_bug/capture-ics/capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "proxmark3": [
+    {
+      "name": "Wiegand Card Dump & Replay (HID Prox / EM4100 / Indala)",
+      "description": "Python script interfacing with Proxmark3 Iceman firmware via pm3 subprocess. Provides an interactive menu to: auto-detect card type with lf search + hf search, read HID Prox cards (lf hid read) extracting Facility Code and Card Number, read EM4100 UIDs (lf em 410x reader), read Indala cards, clone HID Prox FC/CN to T5577 blank (lf hid clone), clone EM4100 UID to T5577, and simulate/replay HID Prox cards (lf hid sim). Supports HID Prox, EM4100, and Indala formats. Saves all card data to timestamped JSON files in ./loot/wiegand/. Includes post-clone verification reads to confirm T5577 emits the correct data.",
+      "path": "payloads/proxmark3/wiegand-dump/wiegand.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "MIFARE Classic Attack Automation (autopwn + nested + darkside + clone)",
+      "description": "Python automation script for MIFARE Classic key recovery via Proxmark3 Iceman firmware. Runs a three-stage fallback attack sequence: (1) hf mf autopwn for full automated attack (nested, hardnested, dictionary); (2) hf mf nested if autopwn fails, requiring at least sector 0 KeyA default FFFFFFFFFFFF; (3) hf mf darkside for CRYPTO1 PRNG vulnerable cards. After key recovery, dumps full card memory to .bin with hf mf dump. Supports cloning to Magic Card Gen1a (hf mf cload) and Gen2/CUID. Saves recovered keys and results to ./loot/mifare/ as timestamped JSON. Each attack method can also be run individually from the interactive menu.",
+      "path": "payloads/proxmark3/mifare-classic-attack/mifare.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "RFID Survey (LF + HF auto-detect)",
+      "description": "Proxmark3 Iceman firmware shell script that runs a full LF and HF survey. Executes 'lf search' to auto-detect low-frequency (125/134 kHz) tags and 'hf search' for high-frequency (13.56 MHz) tags. Also runs 'hf 14a reader' for ISO 14443-A tag enumeration. Outputs detected tag types, UIDs, and technology details to a timestamped log file. Serves as the first-pass recon step before targeted card cloning or audit scripts. Supports all common LF formats (EM410x, HID, Indala, AWID, Prox) and HF formats (MIFARE Classic/Ultralight/DESFire, NTAG, iCLASS, FeliCa).",
+      "path": "payloads/proxmark3/rfid-survey.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "EM410x Clone (read → parse UID → clone to T5577)",
+      "description": "Proxmark3 script for cloning EM410x (125 kHz) access cards to a T5577 writable blank. Reads the source card with 'lf em 4x02 reader' or 'lf search', parses the 40-bit EM410x UID from the output, then clones it with 'lf em 410x clone --uid'. After cloning, performs a verification read to confirm the T5577 now emits the correct UID. Logs the original UID, clone operation result, and verification status. Compatible with EM4100, EM4102, and EM4200 source cards. Typical access control use case: cloning employee badge for authorized physical security testing.",
+      "path": "payloads/proxmark3/rfid-clone-em410x.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "MIFARE Classic Audit (autopwn, key recovery, dump)",
+      "description": "Proxmark3 script that performs a full MIFARE Classic 1K/4K security audit using the Iceman firmware autopwn command. Runs 'hf mf autopwn' which automatically attempts nested attack, hardnested attack, and dictionary attacks to recover all sector keys. Once keys are recovered, dumps the full card memory to a binary file (.bin) and a JSON representation. Also extracts the key table for all 16/32 sectors (both KeyA and KeyB). Saves the dump and key file to the output directory. Suitable for assessing whether MIFARE Classic deployments are vulnerable to known cryptographic attacks (CRYPTO1 weaknesses).",
+      "path": "payloads/proxmark3/rfid-mifare-classic-audit.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "DESFire Enumeration (info + app IDs + file IDs per AID)",
+      "description": "Proxmark3 script for enumerating MIFARE DESFire (ISO 14443-A) card structure without authentication. Runs 'hf mfdes info' to get card UID, batch number, production date, hardware/software version, and free memory. Runs 'hf mfdes getappids' to list all Application IDs (AIDs) on the card. For each discovered AID, attempts 'hf mfdes getfileids' to list file IDs within the application. Logs the full card structure tree (AID → File IDs) without requiring master key or application keys. Useful for identifying what applications are hosted on a DESFire card (access control, transit, loyalty) before attempting key-based attacks.",
+      "path": "payloads/proxmark3/rfid-desfire-enum.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "HID Clone (read FC/CN → clone to T5577)",
+      "description": "Proxmark3 script for cloning HID Prox (26-bit Wiegand) and HID Corporate 1000 access cards to a T5577 writable blank. Reads the source card with 'lf hid reader' to extract the Facility Code (FC) and Card Number (CN). Clones using 'lf hid clone --fc [FC] --cn [CN]'. Performs a post-clone verification read to confirm the T5577 emits the correct FC/CN combination. Supports HID H10301 (standard 26-bit), H10302, H10304, and Corporate 1000 (35-bit) card formats. Logs the FC, CN, raw bit string, and clone verification result.",
+      "path": "payloads/proxmark3/rfid-hid-clone.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "hackrf_one": [
+    {
+      "name": "Spectrum Survey (hackrf_sweep CSV + gnuplot PNG + peak listing)",
+      "description": "HackRF One shell script that uses hackrf_sweep to scan a configurable frequency range (default 100 MHz - 6 GHz) and write results to a CSV file. Post-processes the CSV with gnuplot to produce a spectrum waterfall/power PNG visualization. Parses the CSV to extract the top 10 peak signal frequencies by power level (dBm) and prints them with their frequency, bandwidth, and power. Useful for initial RF environment characterization before targeted capture operations. Configurable sweep step size and LNA/VGA gain via script variables.",
+      "path": "payloads/hackrf_one/hackrf-spectrum-survey.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Record/Replay IQ (hackrf_transfer -r/-t, configurable freq/rate/gain)",
+      "description": "HackRF One script supporting both record and replay modes for raw IQ data. Record mode: hackrf_transfer -r [outfile] at 2 Msps sample rate, LNA gain 16 dB, VGA gain 16 dB, configurable center frequency and duration. Replay mode: hackrf_transfer -t [infile] with configurable TX gain (default 20 dB) and the same frequency/rate. Supports amplifier enable flag for extended range. IQ files stored as signed 8-bit interleaved complex samples (.iq or .raw). Can be opened in GNU Radio, Universal Radio Hacker, or Inspectrum for signal analysis. Common use: replaying RF remotes, key fobs, or other recorded signals for authorized replay testing.",
+      "path": "payloads/hackrf_one/hackrf-record-replay.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Pager Sniff (POCSAG512/1200/2400 + FLEX via multimon-ng pipe)",
+      "description": "HackRF One script for receiving and decoding pager traffic. Records IQ at 152.0 MHz (configurable, common US pager frequencies) and pipes through sox for resampling, then through multimon-ng for POCSAG 512/1200/2400 baud and FLEX protocol decode. Decoded messages (including RIC/capcode, function, and message text) are written to a timestamped log file with per-message timestamps. Useful for OSINT and authorized communications security assessments in environments that use legacy paging infrastructure (healthcare, industrial, emergency services).",
+      "path": "payloads/hackrf_one/hackrf-pager-sniff.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "ADS-B Decode (dump1090 pipe, aircraft position/callsign)",
+      "description": "HackRF One script for receiving and decoding ADS-B (Automatic Dependent Surveillance–Broadcast) aircraft transponder signals at 1090 MHz. Pipes HackRF IQ output to dump1090 for Mode S/ADS-B decoding, or falls back to rtl_adsb if dump1090 is unavailable. Outputs decoded aircraft data including ICAO 24-bit address, callsign, altitude, speed, heading, and GPS position to a log file. Produces a summary of unique aircraft observed, altitude distribution, and a KML file for visualization in Google Earth. Primarily used for RF reception verification and airspace situational awareness.",
+      "path": "payloads/hackrf_one/hackrf-adsb-decode.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "GSM Cell Survey (grgsm_scanner GSM900/DCS1800/PCS1900)",
+      "description": "HackRF One script for passive GSM base station enumeration using grgsm_scanner. Scans GSM 900 (880-960 MHz), DCS 1800 (1710-1880 MHz), and PCS 1900 (1850-1990 MHz) bands. For each detected ARFCN, decodes the BCCH broadcast channel to extract: MCC (Mobile Country Code), MNC (Mobile Network Carrier), LAC (Location Area Code), Cell ID, BSIC, and signal power. Writes results to a CSV file. Useful for characterizing the cellular RF environment and identifying the carrier infrastructure present at a target location. Requires grgsm_scanner (gr-gsm package) installed.",
+      "path": "payloads/hackrf_one/hackrf-gsm-survey.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "ubertooth_one": [
+    {
+      "name": "BLE Survey (ubertooth-btle -f, PCAP + tshark decode)",
+      "description": "Ubertooth One script for Bluetooth Low Energy (BLE) passive monitoring. Runs ubertooth-btle -f (follow mode, all advertising channels) and captures to a PCAP file. Post-capture tshark processing extracts: unique advertiser MAC addresses, device names from GAP Complete/Shortened Local Name records, RSSI per device, and advertisement PDU types (ADV_IND, ADV_DIRECT_IND, SCAN_RESP). Produces a device inventory CSV sorted by signal strength. Useful for BLE asset discovery and identifying unencrypted advertisement data in authorized Bluetooth security assessments.",
+      "path": "payloads/ubertooth_one/ubertooth-ble-survey.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "BR/EDR Follow (ubertooth-follow target, L2CAP decode)",
+      "description": "Ubertooth One script for following a specific Bluetooth Classic (BR/EDR) connection. Takes a target BD_ADDR as argument and runs ubertooth-follow -t [target] to capture the baseband traffic between the target device and its piconet master. Captures to a PCAP and runs live tshark L2CAP dissection to decode protocol layers (L2CAP, RFCOMM, SDP, AVDTP, HFP, A2DP). Outputs decoded payload summary to log. Requires the Ubertooth to observe the initial connection establishment (FHS packet) to synchronize the frequency hopping sequence — most effective when positioned near the target at connection time.",
+      "path": "payloads/ubertooth_one/ubertooth-bredr-sniff.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "2.4GHz Spectrum (ubertooth-specan sweep)",
+      "description": "Ubertooth One script that uses ubertooth-specan to perform a continuous 2.4 GHz spectrum analysis sweep across the entire 2.402-2.480 GHz ISM band. Captures signal level data with the -l flag and writes time-series RSSI measurements per channel to a CSV. Post-processes to identify the busiest channels and generate a channel utilization heatmap. Useful for RF interference analysis, identifying non-standard 2.4 GHz protocols (Zigbee, Z-Wave 2.4 GHz, proprietary ISM devices), and characterizing the RF environment before Bluetooth or WiFi attacks.",
+      "path": "payloads/ubertooth_one/ubertooth-spectrum.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "yardstick_one": [
+    {
+      "name": "Sub-GHz Survey (300-950 MHz RSSI sweep, CSV output)",
+      "description": "Python script using rfcat to perform a continuous RSSI sweep across the 300-950 MHz sub-GHz band with the Yardstick One. Steps through the band at 1 MHz increments using MOD_ASK_OOK modulation. Prints frequencies with RSSI above -80 dBm threshold in real time and writes all measurements to a CSV (frequency, RSSI, timestamp). Identifies active sub-GHz transmitters: key fobs, garage door openers, RF remotes, weather stations, tire pressure sensors, AMR utility meters, and proprietary ISM devices. Serves as initial reconnaissance before targeted recording or analysis.",
+      "path": "payloads/yardstick_one/yardstick-survey.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "OOK Record (rfcat RFrecv loop, bin file output)",
+      "description": "Python rfcat script for recording On-Off Keying (OOK) RF signals with the Yardstick One. Configures the radio at a specified center frequency with 4800 baud symbol rate, MOD_ASK_OOK modulation, and no sync word (to capture arbitrary OOK bursts). Runs RFrecv in a loop, captures all received packets above the RSSI threshold, and writes raw IQ bytes to a binary file with a per-packet timestamp. Stops after a configurable number of captures or timeout. Output binary file can be replayed with yardstick-ook-replay.py or analyzed with Universal Radio Hacker or inspectrum.",
+      "path": "payloads/yardstick_one/yardstick-ook-record.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "OOK Replay (rfcat RFxmit with configurable repeat)",
+      "description": "Python rfcat script for replaying previously recorded OOK signal data with the Yardstick One. Reads a binary capture file produced by yardstick-ook-record.py, configures the radio to the same center frequency and modulation parameters, and calls RFxmit to transmit the signal. Supports configurable repeat count (default 3 transmissions) and inter-transmission delay. TX power is configurable. Used for authorized replay testing of RF-controlled devices such as gate openers, RF door locks, alarm sensors, and remote controls to verify whether replay attacks are possible in the absence of rolling code protection.",
+      "path": "payloads/yardstick_one/yardstick-ook-replay.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Jamming Detect (RSSI window monitor, 90% threshold alert)",
+      "description": "Python rfcat script for detecting RF jamming activity on a monitored frequency. Polls RSSI on the configured frequency every 50ms and maintains a rolling window of the last N samples. If more than 90% of samples in the window exceed a high-power threshold (indicating sustained jamming), triggers an alert with timestamp, frequency, and sustained RSSI level. Logs all events to a file and optionally prints to stdout. Useful for verifying that RF monitoring systems or alarm sensors remain operational in the presence of jamming, or for detecting jamming attacks against target infrastructure during authorized assessments.",
+      "path": "payloads/yardstick_one/yardstick-jamming-detect.py",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "bus_pirate_5": [
+    {
+      "name": "UART Sniff (transparent bridge, configurable baud)",
+      "description": "Bus Pirate 5 shell script for UART traffic sniffing and transparent bridging. Configures the Bus Pirate UART mode at a specified baud rate (default 115200) and sets up a socat or screen bridge to display and log all traffic to/from the target device's UART pins. Also supports raw logging via stty + cat for headless operation. Output written to a timestamped log file. Useful for intercepting embedded device debug consoles, boot logs, and inter-board UART communications during hardware security assessments. Supports common baud rates from 9600 to 921600.",
+      "path": "payloads/bus_pirate_5/buspirate-uart-sniff.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "I2C Scan (binary mode, 0x00-0x77 address sweep, ACK detection)",
+      "description": "Bus Pirate 5 script that performs an I2C bus address scan using the Bus Pirate binary bitbang mode. Sends the BBIO1 entry sequence (20× 0x00) to enter binary mode, then switches to I2C mode (0x02 → expects 'I2C1' response). Iterates through I2C addresses 0x00-0x77, sends a START + address byte + WRITE bit, and checks the response byte[2] == 0x00 for ACK. Prints and logs each responding address. Restores the Bus Pirate to terminal mode after the scan. Detects EEPROMs, RTCs, sensors, GPIO expanders, and other I2C peripherals on the target board.",
+      "path": "payloads/bus_pirate_5/buspirate-i2c-scan.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SPI Flash Dump (flashrom buspirate_spi, W25Q/MX25L/ISSI)",
+      "description": "Bus Pirate 5 script for dumping SPI flash chip contents using flashrom with the buspirate_spi programmer. Auto-detects connected SPI flash chip model and size. Reads the full flash contents to a binary file and computes an MD5 hash for integrity verification. Supports common flash families: Winbond W25Q series, Macronix MX25L series, ISSI IS25LP series, and other flashrom-supported parts. Configures the Bus Pirate SPI interface at appropriate speed (default 1 MHz) with the correct CS polarity. Useful for extracting firmware from embedded devices, routers, IoT hardware, and UEFI/BIOS chips during hardware security assessments.",
+      "path": "payloads/bus_pirate_5/buspirate-spi-flash-dump.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "JTAG IDCODE (openocd or urjtag, TAP discovery)",
+      "description": "Bus Pirate 5 script for JTAG Test Access Port (TAP) discovery and IDCODE reading. Attempts OpenOCD first with the buspirate interface adapter at the configured JTAG TCK/TDI/TDO/TMS pins, using the IDCODE instruction to identify connected devices in the JTAG chain. Falls back to urjtag (jtag command-line) if OpenOCD is unavailable. Parses the 32-bit IDCODE to extract manufacturer ID (bits [11:1]), part number (bits [27:12]), and version (bits [31:28]). Logs all discovered TAPs and their decoded identities. Serves as the first step in JTAG-based firmware extraction or debug access.",
+      "path": "payloads/bus_pirate_5/buspirate-jtag-idcode.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "cynthion": [
+    {
+      "name": "USB Sniff (packetry/cynthion Python API, sigrok output)",
+      "description": "Cynthion shell script that launches USB traffic capture using the packetry tool or the Cynthion Python API directly. Captures full-speed or high-speed USB traffic between a host and a target device connected through the Cynthion's CONTROL and PROXY ports. Writes captured traffic to a sigrok-compatible .sr session file for analysis in PulseView, and optionally exports to PCAP format for Wireshark USB dissection. Useful for reverse engineering proprietary USB device protocols, analyzing HID descriptor negotiation, and auditing USB authentication mechanisms on hardware security keys or smart card readers.",
+      "path": "payloads/cynthion/cynthion-usb-sniff.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Facedancer HID Fuzz (descriptor mutation, crash capture)",
+      "description": "Python Facedancer script for USB HID descriptor fuzzing via the Cynthion. Presents the host with a baseline 63-byte HID report descriptor, then applies 5 mutation strategies: bit flip, byte replace, length field corruption, report ID mutation, and field type corruption. Each mutated descriptor is offered to the host as a new HID device enumeration. Monitors for host-side crashes (driver exceptions, BSOD triggers, kernel panics) and saves crash-inducing descriptors to crash_N.bin files for analysis. Designed to find USB HID driver vulnerabilities in OS kernel and user-space HID stacks during authorized security research.",
+      "path": "payloads/cynthion/facedancer-hid-fuzz.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Facedancer Mass Storage (FAT32 image, AUTORUN.INF emulation)",
+      "description": "Python Facedancer script that emulates a USB Mass Storage device (BOT/SCSI) via the Cynthion, presenting a 64MB FAT32 disk image to the host. The disk image contains an AUTORUN.INF file and a test.bat script for Windows autorun testing (verifying whether Windows autorun/autoplay policies are enforced). Also demonstrates custom SCSI command handling for testing how host drivers respond to vendor-specific commands. The disk image file path and contents are fully configurable. Useful for testing USB device policy enforcement, DLP solutions, and endpoint protection products.",
+      "path": "payloads/cynthion/facedancer-mass-storage.py",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "greatfet_one": [
+    {
+      "name": "Logic Capture (gf logic, sigrok output)",
+      "description": "GreatFET One shell script for multi-channel logic analyzer capture using the 'gf logic' command. Captures up to 16 digital channels at configurable sample rate (default 10 MHz). Saves output in sigrok .sr session format compatible with PulseView for protocol decoding. Supports configurable trigger conditions (rising/falling edge on any channel). Useful for capturing and decoding digital bus protocols (SPI, I2C, UART, 1-Wire, parallel buses) on target embedded hardware during security assessments. Post-capture protocol decoding is performed in PulseView using the appropriate sigrok decoder plugin.",
+      "path": "payloads/greatfet_one/greatfet-logic-capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SWD Flash Dump (pyocd savemem Flash + SRAM regions)",
+      "description": "GreatFET One script for dumping microcontroller firmware via the SWD (Serial Wire Debug) interface using pyocd. Attempts to dump the primary flash region starting at 0x08000000 for 512KB (common STM32 configuration), falling back to 0x00000000 if the primary address fails (ARM Cortex-M systems that mirror flash at 0). Also dumps SRAM starting at 0x20000000 for forensic memory analysis. Computes MD5 hashes of all dumped regions. Output saved as separate .bin files per memory region. Requires the GreatFET to be connected via SWD to the target's SWDIO and SWDCLK pins with a shared GND.",
+      "path": "payloads/greatfet_one/greatfet-swd-dump.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "debug_probes": [
+    {
+      "name": "STM32 Flash Dump (pyocd/st-flash, MD5 verify)",
+      "description": "Debug probe shell script for dumping STM32 microcontroller flash memory. Primary method uses pyocd savemem to read the full flash region (0x08000000, auto-sized based on detected part). Falls back to st-flash read if pyocd fails (requires ST-Link V2/V3 or compatible probe). Computes and logs an MD5 hash of the dumped binary for integrity verification and comparison across multiple reads. Saves the dump to a timestamped .bin file. Compatible with all STM32 families (F0/F1/F2/F3/F4/F7/G0/G4/H7/L0/L4/WB) when connected via SWD or JTAG through a supported debug probe.",
+      "path": "payloads/debug_probes/stm32-flash-dump.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "STM32 RDP Check (option byte read, Level 0/1/2 decode)",
+      "description": "Debug probe script for reading and decoding STM32 Read Protection (RDP) option bytes. Reads the option byte register at the family-specific address (0x1FFF7800 for F0/F1/F3, 0x1FFFC000 for F0 Cat.1, 0x1FF80000 for F7/H7) using pyocd read32. Decodes the RDP byte value: 0xAA = Level 0 (no protection, flash readable), any other value except 0xCC = Level 1 (debug access blocked, but downgrade to L0 possible with mass erase), 0xCC = Level 2 (permanent JTAG/SWD disable, irreversible). Logs the raw option byte value and decoded protection level. Critical first step before any flash extraction attempt.",
+      "path": "payloads/debug_probes/stm32-rdp-check.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "J-Link RTT Capture (JLinkExe RTT server + nc port 19021)",
+      "description": "Shell script for capturing Real-Time Transfer (RTT) debug output from embedded targets using a SEGGER J-Link debug probe. Launches JLinkExe in RTT server mode on the configured target MCU (device name, interface SWD/JTAG, speed) with -RTTTelnetPort 19021. Connects to the RTT telnet port with netcat and logs all output to a timestamped file. Captures printf-style debug output, log messages, crash dumps, and diagnostic data emitted by the target firmware via the SEGGER RTT API (SEGGER_RTT_printf). Useful for passive firmware behavior analysis and extracting debug information without halting or modifying the target system.",
+      "path": "payloads/debug_probes/jlink-rtt-capture.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "zigbee": [
+    {
+      "name": "Channel Survey (KillerBee 802.15.4 frames, PAN ID + device discovery, ch 11-26)",
+      "description": "Python KillerBee script for passive Zigbee/IEEE 802.15.4 network discovery. Auto-detects KillerBee-compatible hardware (Sonoff Zigbee dongle, RZUSBSTICK, ApiMote, CC2531) using zbid and /dev/ttyUSBx fallback. Sweeps channels 11 through 26 (the full 802.15.4 2.4 GHz channel plan) at a configurable dwell time per channel. Parses received frames to extract: PAN IDs (from beacon frames and data frame addressing), source and destination addresses (both short 16-bit and extended 64-bit EUI-64), frame types, and sequence numbers. Produces a per-channel summary of discovered PAN IDs and device counts.",
+      "path": "payloads/zigbee/zigbee-channel-survey.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PCAP Capture (KillerBee + PcapDump, single channel)",
+      "description": "Python KillerBee script for continuous 802.15.4 packet capture to a PCAP file on a single channel. Uses KillerBee's PcapDump class to write all received frames in PCAP format compatible with Wireshark's IEEE 802.15.4 dissector. Captures indefinitely until interrupted, printing progress every 100 frames (frame count, PAN IDs seen, unique source addresses). Supports configurable channel (11-26) and output file path. The resulting PCAP can be opened in Wireshark for full protocol dissection including Zigbee NWK, APS, ZCL layers if the network key is known.",
+      "path": "payloads/zigbee/zigbee-pcap-capture.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Replay Attack (scapy rdpcap + kb.inject, ACK monitoring)",
+      "description": "Python KillerBee + scapy script for 802.15.4 replay attack testing. Reads frames from a previously captured PCAP using scapy rdpcap, filters to the target PAN ID and optionally specific source/destination addresses, and retransmits each frame using kb.inject(). Monitors for ACK_RCVD vs NO_RESPONSE to determine whether the target device accepted the replayed frame. Useful for testing whether Zigbee devices implement replay protection (APS frame counters, sequence number validation). Configurable inter-frame delay. Logs injection results per frame with frame number, type, and ACK status.",
+      "path": "payloads/zigbee/zigbee-replay-attack.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Key Extract (APS Transport Key frame detect, cleartext NWK key)",
+      "description": "Python KillerBee script for passive Zigbee network key extraction. Monitors a specified channel for APS (Application Support Sub-layer) Transport Key command frames (cmd_id 0x04), which are sent during device joining and contain the network key — sometimes transmitted in cleartext over networks using the 'well-known' trust center link key (0x5a6967426565416c6c69616e63653039). Extracts the 128-bit NWK key from the Transport Key payload and applies an entropy heuristic to distinguish random keys from predictable ones. Also watches for key-transport frames using the default Zigbee 3.0 install code derivation. Saves extracted keys with timestamp and source/destination addresses.",
+      "path": "payloads/zigbee/zigbee-key-extract.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "KillerBee Launch (auto-detect Sonoff/CC2531, zbdump to PCAP)",
+      "description": "Bash integration script for quickly launching a KillerBee zbdump capture session. Auto-detects attached KillerBee-compatible hardware using zbid; if zbid reports no device, falls back to scanning /dev/ttyUSBx for known device signatures. Validates the configured channel is within the 802.15.4 range (11-26). Launches zbdump with --channel, --device, --pcap-out, and --count 0 (capture indefinitely). After capture completes or is interrupted, runs tshark post-processing to report: total frame count, unique PAN IDs observed, and unique source addresses seen. Serves as a quick-start wrapper for operators who want to begin capturing without invoking Python scripts directly.",
+      "path": "payloads/zigbee/killerbee-launch.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "lora": [
+    {
+      "name": "Survey (MicroPython serial, SF7-12/BW sweep, RSSI/SNR CSV)",
+      "description": "Python script that pushes a MicroPython program to an SX1276/SX1262 LoRa module via raw REPL (Ctrl+A / Ctrl+D paste mode over serial). The pushed program sweeps all LoRa spreading factors (SF7-SF12) and bandwidth configurations (125 kHz, 250 kHz, 500 kHz) and attempts to receive packets on each combination for a short window. For each combination that receives a packet, records RSSI and SNR to a CSV. On completion, the CSV is read back over serial. Useful for determining which SF/BW parameters are actively in use on a target LoRa network before sniffing or replay operations.",
+      "path": "payloads/lora/lora-survey.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "LoRaWAN Sniff (MHDR parse, JoinRequest/DataUp, DevEUI/AppEUI extract)",
+      "description": "Python script that receives LoRaWAN packets via a MicroPython-controlled LoRa module and decodes the MAC header (MHDR) to classify message types. For JoinRequest frames (MType 0b000), extracts and logs AppEUI, DevEUI, and DevNonce in EUI-64 format. For Unconfirmed/Confirmed Data Up frames (MType 0b010/0b100), extracts DevAddr, FCnt (frame counter), FCtrl flags, and FPort. Identifies frames with ADR (Adaptive Data Rate) or ACK flags set. Does not decrypt MIC or FRMPayload (which require the AppSKey/NwkSKey). Useful for passive LoRaWAN device enumeration, DevAddr mapping, and frame counter analysis to assess replay protection.",
+      "path": "payloads/lora/lora-lorawan-sniff.py",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Replay Test (TX + 5s RX window, response detection, replay protection check)",
+      "description": "Python script for LoRa/LoRaWAN replay attack testing. Reads a previously captured LoRa packet (raw bytes) from a file, transmits it via the MicroPython LoRa module, then opens a 5-second receive window listening for any response. Reports whether a RESPONSE was detected (indicating the replayed frame was accepted and acted upon by the target device/network server) or NO_RESPONSE (indicating the frame was rejected or ignored). Multiple replay attempts with configurable inter-attempt delay. Documents the result per attempt with timestamp and RSSI of any response. Used to verify whether LoRaWAN devices enforce frame counter validation to prevent replay attacks.",
+      "path": "payloads/lora/lora-replay-test.py",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "chameleon_ultra": [
+    {
+      "name": "Load UID (chameleon-cli or Python, MIFARE/NTAG slot config)",
+      "description": "Chameleon Ultra shell script for loading a specific UID into an emulation slot via chameleon-cli or the ChameleonUltra Python library. Configures the target slot for the appropriate card type (MIFARE Classic 1K, MIFARE Classic 4K, MIFARE Ultralight, or NTAG21x series) using slot_change_tag_type(), writes the UID with slot_tag_write(), and enables the slot. Verifies the loaded UID with slot_tag_uid_read(). Useful for quickly loading a cloned or synthesized UID for authorized physical access testing without needing to write to a physical T5577 blank or carry multiple cards.",
+      "path": "payloads/chameleon_ultra/chameleon-load-uid.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "MIFARE Classic Emulate (full sector dump load, 1K/4K auto-detect)",
+      "description": "Chameleon Ultra script for loading a full MIFARE Classic card dump (obtained from Proxmark3 autopwn or similar) into the Chameleon for complete emulation including sector data and keys. Auto-detects card size from the dump file (1024 bytes = 1K / 16 sectors, 4096 bytes = 4K / 40 sectors). Uses slot_change_tag_type() for the appropriate MIFARE Classic variant and slot_tag_write() to load the full binary dump into the emulation slot. Enables the slot for active emulation. The Chameleon will respond to reader requests with the full card data including sector keys, supporting authenticated access to all sectors.",
+      "path": "payloads/chameleon_ultra/chameleon-mifare-emulate.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "Slot Survey (list all 8 slots: type, UID, enabled status)",
+      "description": "Chameleon Ultra script that enumerates all 8 emulation slots and reports the current configuration of each. For each slot, queries: tag type (MIFARE Classic 1K/4K, MIFARE Ultralight, NTAG213/215/216, EM4100, or empty), UID (if a card is loaded), and enabled/disabled status via slot_enable(). Outputs a formatted table for quick operator reference of what is loaded in each slot before a physical access engagement. Useful as a pre-engagement checklist to confirm the correct card is in the correct slot.",
+      "path": "payloads/chameleon_ultra/chameleon-slot-survey.sh",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "flipper_zero": [
+    {
+      "name": "BadUSB PrivescAudit Windows (UAC bypass, PS stager, DuckyScript 1.0)",
+      "description": "Flipper Zero BadUSB payload in DuckyScript 1.0 syntax targeting Windows 10/11. Opens the Run dialog (GUI r), types a hidden PowerShell command that calls Start-Process powershell with -Verb runAs to request elevation. The elevated PowerShell session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, redirects output to %TEMP%\\privesc_out.txt, and POSTs the results back via iwr. Accepts the UAC prompt with ALT+Y after a 2-second delay. Note: DuckyScript 1.0 (used by Flipper Zero BadUSB) does not support VAR, EXTENSION, PASSIVE_WINDOWS_DETECT, or JITTER — uppercase keywords only.",
+      "path": "payloads/flipper_zero/badusb-privesc-windows/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "BadUSB SysAudit macOS (Spotlight Terminal, curl stager)",
+      "description": "Flipper Zero BadUSB payload in DuckyScript 1.0 syntax targeting macOS 12+. Opens Spotlight (GUI SPACE), types 'Terminal', and presses ENTER to launch a Terminal window. Waits 1.5 seconds for Terminal to open, then types a single-line curl command that downloads SysAudit_macos.sh from the attacker HTTP server (172.16.84.1:8080) and pipes it directly to bash, redirecting output to /tmp/sysaudit_out.txt. A second curl command POSTs the results file back to the /upload endpoint. Uses DuckyScript 1.0 uppercase syntax compatible with the Flipper Zero BadUSB app.",
+      "path": "payloads/flipper_zero/badusb-sysaudit-mac/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "wifi_duck": [
+    {
+      "name": "PrivescAudit Windows (UAC elevation, PS stager)",
+      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens the Run dialog (gui r), types a PowerShell command that invokes Start-Process powershell with -Verb runAs to request elevation. The elevated PS session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, captures output to %TEMP%\\privesc_out.txt, and POSTs results back via iwr. Accepts the UAC dialog with alt y after a 2-second delay. WiFi Duck payloads are uploaded via the WiFi Duck web interface at http://192.168.4.1 — the duck connects to target WiFi and can be triggered remotely.",
+      "path": "payloads/wifi_duck/privesc-windows-audit/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit Windows (PowerShell, no UAC, current user audit)",
+      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens Run dialog (gui r) and launches a hidden non-elevated PowerShell session. Downloads SysAudit.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\sa.ps1, executes it, redirects output to %TEMP%\\sa_out.txt, and POSTs results back. No UAC elevation — runs entirely in the context of the currently logged-in user. Suitable for current-user privilege level audit without triggering UAC prompts that might alert the target.",
+      "path": "payloads/wifi_duck/sysaudit-windows/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit macOS (Spotlight Terminal, curl stager)",
+      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting macOS 12+. Opens Spotlight (gui SPACE), types 'Terminal', and presses enter to launch a Terminal window. After a 1.5-second delay, types a curl one-liner that downloads SysAudit_macos.sh from the attacker HTTP server (172.16.84.1:8080) and pipes it to bash, redirecting stdout and stderr to /tmp/sa_out.txt. A second curl POSTs the results file to the /upload endpoint. WiFi Duck provides wireless triggering of the payload via its web UI at http://192.168.4.1.",
+      "path": "payloads/wifi_duck/sysaudit-mac/payload.txt",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "other": [
+    {
+      "name": "SysAudit - Debian/Ubuntu",
+      "description": "Bash audit script for Debian/Ubuntu Linux systems. Covers 7 sections: (1) OS and kernel version, architecture, uptime, hostname; (2) User accounts, password policy, sudoers, login history, failed logins; (3) Network interfaces, routing table, listening ports (ss/netstat), active connections, firewall rules (ufw/iptables); (4) Installed packages (dpkg), recently installed/modified packages, running services (systemctl); (5) Scheduled tasks (cron/crontab for all users, /etc/cron.*, anacron, at jobs); (6) Security posture: AppArmor status and profiles, SUID/SGID binaries, world-writable files/dirs, unowned files; (7) Filesystem mounts, disk usage, open files (lsof). Output formatted as a plain text report with section headers.",
+      "path": "payloads/other/SysAudit_debian.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit - RHEL/CentOS/Fedora",
+      "description": "Bash audit script for Red Hat family Linux systems (RHEL, CentOS, AlmaLinux, Rocky Linux, Fedora). Covers 7 sections: (1) OS version (os-release, uname), kernel, architecture, uptime; (2) User accounts, /etc/shadow status, sudoers (visudo -l), authselect profile, lastlog, faillock history; (3) Network interfaces (ip addr/route), ss listening ports, firewalld zones/rules, nftables; (4) Installed packages (dnf/rpm), services (systemctl), recently modified package files; (5) Cron jobs for all users, /etc/cron.*, anacron, systemd timers; (6) SELinux status (sestatus), mode, policy, AVC denials (ausearch); SUID/SGID binaries, world-writable paths; (7) Filesystem mounts, disk usage, open files.",
+      "path": "payloads/other/SysAudit_redhat.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit - macOS",
+      "description": "Bash audit script for macOS 12+. Covers 7 sections: (1) system_profiler SPSoftwareDataType (OS version, build, hostname, model); (2) Users (dscl), groups, password policy (pwpolicy), login history, recent console logins; (3) Network interfaces (ifconfig/networksetup), routing (netstat -rn), listening ports (lsof -iTCP -iUDP), Little Snitch/pf rules; (4) Installed apps (system_profiler SPApplicationsDataType), running processes (ps aux), launch agents/daemons; (5) LaunchAgents and LaunchDaemons (user + system + library), crontab, periodic scripts; (6) SIP status (csrutil), Gatekeeper, TCC database entries (transparency consent), MDM enrollment (profiles), Homebrew installed tools, SUID binaries; (7) Disk usage (df), mounted volumes, open files.",
+      "path": "payloads/other/SysAudit_macos.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit - Windows (BAT)",
+      "description": "Windows CMD batch script system audit for legacy or restricted environments where PowerShell is unavailable or blocked. Covers 6 sections using native CMD commands: (1) OS version (ver, systeminfo), hostname, domain, uptime; (2) Local users (net user), groups (net localgroup), logged-on users (query user); (3) Network config (ipconfig /all), routing (route print), active connections (netstat -an), listening ports; (4) Running services (sc query, net start), installed software (wmic product), scheduled tasks (schtasks /query); (5) Startup items (wmic startup), registry run keys (reg query HKLM/HKCU ...\\Run); (6) Firewall state (netsh advfirewall show). Output written to a text file via redirection.",
+      "path": "payloads/other/SysAudit.bat",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "SysAudit - Windows (PowerShell)",
+      "description": "PowerShell system audit script for Windows 10/11 and Windows Server 2016+. Covers 7 sections using PowerShell cmdlets and .NET: (1) OS, hardware (Get-ComputerInfo), domain membership, pending reboots; (2) Local users (Get-LocalUser), groups (Get-LocalGroupMember), password policy, last logon times; (3) Network adapters, IP config, routing, firewall profiles (Get-NetFirewallProfile), listening ports (Get-NetTCPConnection); (4) Installed software (Get-Package + registry uninstall keys), running services (Get-Service), hotfixes (Get-HotFix); (5) Scheduled tasks (Get-ScheduledTask), startup items, WMI subscriptions; (6) Group Policy settings via XmlDocument parsing of RSoP, Windows Defender status (Get-MpComputerStatus); (7) Disk volumes (Get-PSDrive), BitLocker status (Get-BitLockerVolume). Output exported as structured text with section headers.",
+      "path": "payloads/other/SysAudit.ps1",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "CredExposure - Linux",
+      "description": "Bash script auditing credential exposure vectors on Linux systems. Covers 11 sections: (1) /etc/passwd and /etc/shadow readable by current user; (2) SSH private keys in home dirs and /root; (3) Shell history files (.bash_history, .zsh_history) scanned for passwords in commands; (4) Config files with passwords (grep for 'password', 'passwd', 'secret', 'token', 'api_key' in /home, /etc, /var, /opt); (5) Browser credential files (Firefox logins.json, Chrome Login Data); (6) .netrc, .pgpass, .my.cnf credential files; (7) Environment variables (printenv) screened for secrets; (8) Docker secrets and bind-mounted /etc/passwd; (9) Kubernetes service account tokens (/var/run/secrets); (10) Git repository credential configs and .git/config remotes with embedded credentials; (11) PAM configuration files and nsswitch.conf for authentication stack insights.",
+      "path": "payloads/other/CredExposure-Linux.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "CredExposure - macOS (Keychain, Safari/Chrome, MDM, Kerberos)",
+      "description": "Bash script auditing credential exposure on macOS 12+. Covers 14 sections: (1) Keychain items accessible without authentication (security find-generic-password, find-internet-password); (2) Safari saved passwords (Keychain-backed, lists services/accounts); (3) Chrome/Chromium Login Data SQLite query for saved credentials; (4) SSH private keys in ~/.ssh and /etc/ssh; (5) Shell history (.zsh_history, .bash_history) screened for credentials; (6) .netrc, .pgpass, .my.cnf, application plist files with password keys; (7) MDM enrollment profile contents (profiles show -all); (8) Kerberos ticket cache (klist) and keytab files; (9) AWS/GCP/Azure CLI credential files (~/.aws/credentials, ~/.config/gcloud, ~/.azure); (10) Docker credential helpers and config.json; (11) Environment variables screened for secrets; (12) iCloud Keychain-synced items indicator; (13) Git config credentials and remote URLs with embedded auth; (14) Certificate private keys in /Library/Keychains and ~/Library/Keychains.",
+      "path": "payloads/other/CredExposure-macOS.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "CredExposure - Windows (PowerShell)",
+      "description": "PowerShell script auditing credential exposure vectors on Windows 10/11. Covers 8+ sections: (1) Windows Credential Manager entries (cmdkey /list, CredRead P/Invoke for generic/domain credentials); (2) WDigest registry key status (UseLogonCredential — indicates cleartext creds in LSASS memory); (3) SAM/SYSTEM/SECURITY registry hive accessibility and shadow copy paths for offline extraction; (4) Browser credential stores: Chrome/Edge Login Data (SQLite), Firefox logins.json; (5) PowerShell history file (ConsoleHost_history.txt) scanned for credentials; (6) Group Policy Preferences (GPP) password fields in SYSVOL (cpassword attributes in XML); (7) IIS applicationHost.config and web.config password attributes; (8) Registry-stored credentials (HKCU/HKLM AutoLogon keys, PuTTY sessions, WinSCP stored sessions, VNC password registry keys). Output formatted with section headers and credential values redacted to last 4 chars for safe reporting.",
+      "path": "payloads/other/CredExposure-Windows.ps1",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PrivescAudit - Linux",
+      "description": "Bash privilege escalation audit script for Linux. Covers 10 sections: (1) Sudo permissions (sudo -l) and sudoers misconfigurations (NOPASSWD, shell escapes, GTFOBins-listed binaries); (2) SUID binaries (find / -perm -4000) cross-referenced against GTFOBins; (3) SGID binaries (find / -perm -2000); (4) World-writable files and directories in sensitive paths; (5) Capabilities (getcap -r /) that allow privilege escalation (cap_setuid, cap_net_raw, cap_dac_override); (6) Cron jobs running as root with writable script paths; (7) PATH hijacking: writable directories in root's PATH, relative command references in root cron/init scripts; (8) Writable service unit files and systemd drop-ins; (9) NFS exports with no_root_squash; (10) Kernel version and known local privilege escalation CVE indicators (uname -r vs known vuln ranges).",
+      "path": "payloads/other/PrivescAudit-Linux.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PrivescAudit - macOS (SIP, TCC, LaunchDaemon, dylib hijack)",
+      "description": "Bash privilege escalation audit script for macOS 12+. Covers 13 sections: (1) SIP status (csrutil status) and protected paths; (2) TCC database entries and applications with Full Disk Access or Accessibility grants; (3) LaunchDaemons and LaunchAgents with world-writable script paths; (4) Writable directories in PATH that could enable PATH hijacking; (5) SUID/SGID binaries; (6) Sudo permissions (sudo -l) and sudoers entries; (7) dylib hijack candidates: @rpath/@loader_path references in executables where the rpath directory is writable (otool -l pipe); (8) Setuid root binaries with known bypass history; (9) Writable application bundles in /Applications that run as root; (10) Kernel extensions (kextstat) and SIP exceptions; (11) Apple Silicon Hardened Runtime exceptions (codesign --display --entitlements); (12) XPC service bundle writable paths; (13) MDM-managed configuration profiles that may grant elevated access.",
+      "path": "payloads/other/PrivescAudit-macOS.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PrivescAudit - Windows (PowerShell)",
+      "description": "PowerShell privilege escalation audit script for Windows 10/11 and Server 2016+. Covers 8+ sections: (1) Token privileges (whoami /priv) — flags dangerous privileges: SeImpersonatePrivilege, SeAssignPrimaryTokenPrivilege, SeDebugPrivilege, SeTakeOwnershipPrivilege, SeLoadDriverPrivilege; (2) Unquoted service paths with spaces (Get-WmiObject Win32_Service where PathName has spaces and no quotes); (3) Writable service binary paths (icacls check on service executables); (4) Weak service ACLs (sc sdshow, check for SERVICE_CHANGE_CONFIG for non-admin users); (5) AlwaysInstallElevated registry keys in HKCU and HKLM; (6) Modifiable scheduled tasks (Get-ScheduledTask ACL check); (7) DLL hijack candidates: services/apps with missing DLLs in writable directories (Procmon-style path not found simulation); (8) UAC bypass vectors: fodhelper, eventvwr, computerdefaults, sdclt registry hijacks; auto-elevation COM objects.",
+      "path": "payloads/other/PrivescAudit-Windows.ps1",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "LateralMovement - Linux (SSH trust, NFS, LLMNR, Docker, CUPS)",
+      "description": "Bash script auditing lateral movement vectors on Linux systems. Covers 12 sections: (1) SSH authorized_keys in all user home dirs and /root; (2) SSH known_hosts entries revealing reachable hosts; (3) NFS exports (showmount -e localhost) and client-side NFS mounts with accessible sensitive paths; (4) Kerberos tickets (klist) and keytab files; (5) LLMNR/mDNS enabled (systemd-resolved, avahi-daemon); (6) Samba/SMB shares and null session access; (7) Docker socket (/var/run/docker.sock) accessibility and privileged container detection; (8) LXC/LXD group membership; (9) CUPS printer service remote admin enabled; (10) /etc/hosts and DNS search domain mappings; (11) ARP cache and discovered neighbors; (12) Writable network configuration files (resolv.conf, NetworkManager connections with stored PSKs).",
+      "path": "payloads/other/LateralMovement-Linux.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "LateralMovement - Windows (PowerShell)",
+      "description": "PowerShell script auditing lateral movement vectors on Windows 10/11. Covers 10 sections: (1) SMB shares (net share, Get-SmbShare) and open sessions; (2) Null session accessibility and SMB signing status (Get-SmbServerConfiguration); (3) LLMNR and NBT-NS enabled status (registry checks + service state); (4) WinRM accessibility (Test-WSMan, Get-WSManInstance config); (5) RDP enabled and NLA requirement (registry + Get-ItemProperty); (6) Pass-the-Hash mitigations: LocalAccountTokenFilterPolicy, RestrictedAdmin mode for RDP; (7) Saved RDP connections (HKCU MRU) and credential files (%AppData%\\Microsoft\\Credentials); (8) Administrative shares (ADMIN$, C$, IPC$) and accessibility; (9) Cached domain credentials (cachedlogonscount registry key); (10) Trust relationships (nltest /domain_trusts), domain controllers (nltest /dclist), and network neighborhood discovery.",
+      "path": "payloads/other/LateralMovement-Windows.ps1",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PersistenceSurvey - Linux (systemd, ld.so.preload, PAM, APT hooks)",
+      "description": "Bash script surveying persistence mechanisms on Linux systems. Covers 12 sections: (1) systemd service units and timers in all locations (/etc/systemd/system, /lib/systemd/system, user units) — flags non-package-manager units; (2) /etc/rc.local and SysV init scripts in /etc/init.d; (3) Cron jobs for all users and system cron directories; (4) /etc/ld.so.preload entries (LD_PRELOAD rootkit vector); (5) PAM configuration files (/etc/pam.d/) screened for unusual modules or pam_exec entries; (6) /etc/profile.d/, .bashrc, .bash_profile, .zshrc in all home dirs; (7) APT/dpkg hooks (/etc/apt/apt.conf.d/, DPkg::Post-Invoke); (8) At jobs (atq); (9) udev rules (/etc/udev/rules.d/) with RUN+= entries; (10) Kernel modules (lsmod) compared against package-managed module list; (11) inetd/xinetd service definitions; (12) MOTD scripts (/etc/update-motd.d/) with writable entries.",
+      "path": "payloads/other/PersistenceSurvey-Linux.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PersistenceSurvey - macOS (LaunchDaemons/Agents, DYLD, Login Hooks, XPC)",
+      "description": "Bash script surveying persistence mechanisms on macOS 12+. Covers 12 sections: (1) LaunchDaemons in /Library/LaunchDaemons and /System/Library/LaunchDaemons — flags non-Apple plists; (2) LaunchAgents in /Library/LaunchAgents, /System/Library/LaunchAgents, and ~/Library/LaunchAgents; (3) Login Items (osascript/system events query and legacy /Library/StartupItems); (4) Login Hooks (com.apple.loginwindow plist LoginHook/LogoutHook keys); (5) DYLD_INSERT_LIBRARIES references in launchd plists and shell profiles; (6) crontab entries for all users and /etc/periodic scripts; (7) XPC service bundles in /Library/Application Support and app bundles with writable paths; (8) Kernel extensions (kextstat) — third-party extensions flagged; (9) /etc/rc.common and /etc/rc.server (legacy); (10) .bashrc/.zshrc/.profile in all home dirs; (11) Emond rules (/etc/emond.d/); (12) MDM-deployed profiles (profiles list -all) that configure persistence via MCX/payloads.",
+      "path": "payloads/other/PersistenceSurvey-macOS.sh",
+      "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "PersistenceSurvey - Windows (PowerShell)",
+      "description": "PowerShell script surveying persistence mechanisms on Windows 10/11 and Server 2016+. Covers 10+ sections: (1) Registry Run/RunOnce keys (HKCU/HKLM) including per-user and system-wide; (2) Scheduled tasks (Get-ScheduledTask) — flags tasks not signed by Microsoft or with actions pointing to writable paths; (3) Services (Get-Service / Get-WmiObject Win32_Service) with non-standard binary paths; (4) WMI event subscriptions (Get-WMIObject __EventFilter, __EventConsumer, __FilterToConsumerBinding) — a common fileless persistence vector; (5) LSA security packages and notification DLLs (HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa); (6) Image File Execution Options (IFEO) debugger keys — used for Accessibility Feature backdoors; (7) BootExecute registry value for pre-boot persistence; (8) AppInit_DLLs and AppCertDlls; (9) Browser extension inventory (Chrome/Edge manifest.json paths); (10) Startup folders (shell:startup, shell:common startup). Each section outputs the mechanism name, path/key, value, and a risk flag for non-standard entries.",
+      "path": "payloads/other/PersistenceSurvey-Windows.ps1",
+      "added": "2026-03-25T00:00:00Z"
+    }
+  ],
+  "esp32d": [
+    {
+      "name": "Deauth Monitor (scapy host / ESP32 serial)",
+      "description": "Passive 802.11 deauthentication and disassociation frame monitor. Primary mode uses scapy on the host with a monitor-mode WiFi adapter to sniff for management frames type=0 subtype=12 (deauth) and subtype=10 (disassoc). Displays BSSID, reason code, target MAC, RSSI, and running count per AP. Triggers storm alert when >10 deauth frames arrive within 5 seconds from the same BSSID. Alternative mode reads JSON events from an ESP32 running custom monitor firmware via pyserial. Saves all events to a timestamped JSON file. Requires root/sudo for raw packet sniffing. Install: pip3 install scapy.",
+      "path": "payloads/esp32d/deauth-monitor/deauth_monitor.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "mDNS / Bonjour Service Discovery Scanner",
+      "description": "mDNS/Bonjour service discovery scanner using the Python zeroconf library with a raw multicast socket fallback. Queries 20 service types including _http._tcp, _https._tcp, _ssh._tcp, _smb._tcp, _ftp._tcp, _airplay._tcp, _googlecast._tcp, _homekit._tcp, _ipp._tcp, _mqtt._tcp, _rfb._tcp, _workstation._tcp, and others. Displays service name, hostname, IP address, port, and TXT records in a formatted table. Falls back to raw multicast socket queries (UDP port 5353, 224.0.0.251) if zeroconf is unavailable. Configurable scan timeout. Saves all discovered services to a timestamped JSON file. Install: pip3 install zeroconf.",
+      "path": "payloads/esp32d/mdns-scanner/mdns_scanner.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "WiFi Scanner (MicroPython)",
+      "description": "MicroPython script for ESP32-D that performs an active 802.11 WiFi scan across all channels. Lists discovered networks with SSID, BSSID, channel, RSSI, and authentication mode. Outputs results as JSON to serial. Upload via mpremote and run from REPL.",
+      "path": "payloads/esp32d/wifi-scanner/wifi_scan.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "BLE Scanner (MicroPython)",
+      "description": "MicroPython script using ubluetooth to perform a passive BLE advertisement scan. Collects device address, RSSI, and raw advertisement data for 10 seconds, then prints a summary table. Upload via mpremote.",
+      "path": "payloads/esp32d/ble-scanner/ble_scan.py",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "rpi_pico": [
+    {
+      "name": "USB HID Keyboard Injector (MicroPython)",
+      "description": "MicroPython HID keyboard emulation script for Raspberry Pi Pico. Enumerates as a USB keyboard and types a configurable payload string with configurable inter-keystroke delay. Supports special keys (Enter, Tab, GUI, Ctrl, Alt). Edit the PAYLOAD variable before uploading. Upload as main.py to auto-run on boot.",
+      "path": "payloads/rpi_pico/hid-keyboard/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "USB HID DuckyScript Runner (MicroPython)",
+      "description": "MicroPython DuckyScript interpreter for Raspberry Pi Pico. Parses a payload.txt file from the Pico filesystem and executes HID keyboard injection commands. Supports: STRING, DELAY, ENTER, GUI, CTRL, ALT, SHIFT, TAB, UP/DOWN/LEFT/RIGHT arrows. Upload payload.txt and main.py via mpremote.",
+      "path": "payloads/rpi_pico/ducky-runner/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "rpi_pico_w": [
+    {
+      "name": "WiFi Credential Stealer (HID + HTTP exfil)",
+      "description": "MicroPython script for Pico W. Injects keystrokes to open a terminal and run a credential-harvesting command, then exfiltrates results via HTTP POST to a configurable IP using the Pico W's built-in WiFi. Requires WiFi network credentials to be configured in the script. Upload as main.py.",
+      "path": "payloads/rpi_pico_w/wifi-exfil/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Wireless Sysaudit (HID injection + WiFi exfil)",
+      "description": "Pico W MicroPython payload that injects keystrokes to execute a PowerShell/bash system audit command on the target, then collects and exfiltrates results over the Pico W's WiFi connection to a remote listener. Configurable target OS detection, WiFi credentials, and exfil endpoint.",
+      "path": "payloads/rpi_pico_w/wireless-sysaudit/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "rpi_pico_2w": [
+    {
+      "name": "USB HID DuckyScript Runner (RP2350, MicroPython)",
+      "description": "Same as Pico DuckyScript runner but compiled for RP2350 (Pico 2W). MicroPython DuckyScript interpreter that reads payload.txt from the filesystem and executes USB HID keyboard injection. Takes advantage of RP2350's faster USB enumeration.",
+      "path": "payloads/rpi_pico_2w/ducky-runner/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "nordic_nrf52840": [
+    {
+      "name": "BLE Device Fingerprinting (bleak, OUI lookup, service UUID identification)",
+      "description": "Host-side Python BLE fingerprinting script using the bleak cross-platform library. Performs passive BLE advertisement scanning and collects: MAC address, RSSI, device name/local name, company identifier from Bluetooth SIG company ID table (covering Apple, Samsung, Google, Nordic, TI, and 30+ others), service UUIDs with GATT service name labels (Heart Rate, HID, Battery, Environmental Sensing, Location and Navigation, etc.), inferred device type from service UUID heuristics, TX Power Level, and raw manufacturer-specific advertisement data. Deduplicates devices by MAC address and updates RSSI on re-detection. Prints a live per-device summary and a final sorted summary table. Saves results to timestamped JSON file. Install: pip3 install bleak.",
+      "path": "payloads/nordic_nrf52840/ble-fingerprint/ble_fingerprint.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "BLE MITM Setup (bettercap + GATTacker + bleak + nRF52840 sniffer guide)",
+      "description": "BLE MITM setup guide and automation script. Checks availability of bettercap, GATTacker (Node.js), bleak, Wireshark/tshark, hcitool, and gatttool. Guides the operator through: scanning for BLE targets, enumerating GATT services and characteristics on the selected device (reads readable characteristics, saves full structure to JSON), generating ready-to-run bettercap commands (ble.recon on, ble.enum TARGET), generating GATTacker proxy commands (gatt-server --clone, gatt-mitm), and generating a bleak-based GATT proxy implementation concept. Includes step-by-step nRF52840 Sniffer firmware setup instructions for Wireshark BLE capture integration including firmware flashing, extcap plugin installation, and useful Wireshark display filters. Install: pip3 install bleak.",
+      "path": "payloads/nordic_nrf52840/ble-mitm-setup/ble_mitm_setup.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "BLE Advertisement Sniffer (Wireshark pipe)",
+      "description": "Instructions and helper script for using the nRF52840 Dongle with Nordic BLE Sniffer firmware and Wireshark. Captures BLE advertisements and connection packets. Requires nRF Sniffer firmware and the nrf_sniffer_for_bluetooth_le Wireshark plugin from Nordic Semiconductor.",
+      "path": "payloads/nordic_nrf52840/ble-sniffer/setup.sh",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Zigbee / 802.15.4 Packet Capture",
+      "description": "Setup script for using the nRF52840 Dongle with nRF Sniffer for 802.15.4 firmware and Wireshark. Captures Zigbee, Thread, and other 802.15.4 protocol frames. Requires nRF Sniffer for 802.15.4 firmware and corresponding Wireshark plugin.",
+      "path": "payloads/nordic_nrf52840/zigbee-sniffer/setup.sh",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "lilygo_tdeck": [
+    {
+      "name": "Deauth Monitor (Arduino, promiscuous WiFi, ST7789 display)",
+      "description": "Arduino sketch for LilyGo T-Deck (ESP32-S3) that monitors 802.11 deauthentication and disassociation frames using ESP32 promiscuous WiFi mode (esp_wifi_set_promiscuous + callback). Detects management frames type=0 subtype=0xC0 (deauth) and subtype=0xA0 (disassoc). Maintains per-BSSID deauth and disassoc counts and extracts reason codes from frame payloads. Updates the 320x240 ST7789 display every second showing the top 5 BSSIDs sorted by total frame count with storm alert markers. Detects deauth storms (>10 frames in 5 seconds from same BSSID) and emits storm_alert JSON to Serial. Serial output: JSON per event {\"type\":\"deauth\",\"bssid\":\"xx:xx:xx:xx:xx:xx\",\"reason\":7,\"target\":\"ff:ff:ff:ff:ff:ff\"}. Pin defines: TFT_CS=12, TFT_DC=11, TFT_RST=10, TFT_MOSI=41, TFT_SCLK=40, TFT_BL=42. Requires TFT_eSPI library.",
+      "path": "payloads/lilygo_tdeck/deauth-monitor/deauth_monitor.ino",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "mDNS Scanner (Arduino, ESPmDNS, scrolling display)",
+      "description": "Arduino sketch for LilyGo T-Deck (ESP32-S3) that connects to WiFi and scans for mDNS/Bonjour services using the ESP32 ESPmDNS library. Queries 14 service types: _http, _https, _ssh, _smb, _ftp, _homekit, _googlecast, _airplay, _raop, _ipp, _printer, _rfb, _mqtt, _workstation. WiFi credentials can be hardcoded in WIFI_SSID/WIFI_PASS defines or entered via Serial prompt at boot. Displays discovered services on the 320x240 ST7789 display in a two-line-per-service scrollable list (name + IP:port [type]). Trackball UP/DOWN scrolls through results. Serial output: JSON per service {\"type\":\"service\",\"name\":\"...\",\"service_type\":\"...\",\"host\":\"...\",\"ip\":\"...\",\"port\":80}. Requires TFT_eSPI library and ESP32 Arduino core.",
+      "path": "payloads/lilygo_tdeck/mdns-scanner/mdns_scanner.ino",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "WiFi Deauth Tool (MicroPython)",
+      "description": "MicroPython script for LilyGo T-Deck's ESP32-S3 + display. Scans for nearby WiFi networks, displays them on the T-Deck's 2.8\" display with RSSI, and allows keyboard-driven selection of a target AP for deauthentication frame injection. Requires custom 802.11 raw frame injection support.",
+      "path": "payloads/lilygo_tdeck/wifi-deauth/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Network Recon Display (MicroPython)",
+      "description": "MicroPython payload for T-Deck that performs WiFi network discovery and displays results on the built-in screen with navigation via the trackball. Shows SSIDs, BSSIDs, channels, signal strength, and encryption types. Saves scan results to SD card if inserted.",
+      "path": "payloads/lilygo_tdeck/network-recon/main.py",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "badusb": [
+    {
+      "name": "SysAudit Windows (DuckyScript — DigiSpark/Arduino)",
+      "description": "DuckyScript-compatible HID injection payload for BadUSB devices (DigiSpark, Arduino Micro, Pro Micro). Opens an elevated PowerShell prompt (Win+R → powershell → Ctrl+Shift+Enter → Alt+Y), downloads SysAudit.ps1 from a configurable $SERVER:$PORT, and executes it. Edit SERVER and PORT variables before deployment. Compile to device-specific format: micronucleus hex for DigiSpark, avrdude for Arduino.",
+      "path": "payloads/badusb/sysaudit-windows/payload.txt",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Reverse Shell Dropper (DuckyScript — Windows)",
+      "description": "HID injection payload for BadUSB devices targeting Windows. Opens Run dialog, launches hidden PowerShell, downloads and executes a reverse shell dropper from a configurable URL. Includes JITTER timing for evasion. Configure LHOST and LPORT before compiling.",
+      "path": "payloads/badusb/reverse-shell-windows/payload.txt",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Lock Screen Bypass Info (DuckyScript — macOS)",
+      "description": "DuckyScript payload for BadUSB targeting macOS. Injects keystrokes to open Terminal (Cmd+Space → Terminal), then runs a system information collection one-liner that dumps hostname, user, IP, and running processes to a hidden file in /tmp. Configurable exfil endpoint.",
+      "path": "payloads/badusb/macos-sysinfo/payload.txt",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "evil_crow": [
+    {
+      "name": "Sub-GHz RF Scan (CC1101 raw scan)",
+      "description": "Evil Crow RF payload configuration for scanning the sub-GHz spectrum using the CC1101 chip. Configures CC1101 for raw OOK/ASK reception across 315, 433, 868, and 915 MHz bands. Captures and displays detected transmissions with frequency, modulation type, and signal strength. Access via Evil Crow web interface.",
+      "path": "payloads/evil_crow/rf-scan/config.json",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Garage Door / Remote Replay",
+      "description": "Evil Crow RF payload for capturing and replaying fixed-code remote control signals (garage doors, car alarms, doorbells). Uses CC1101 in OOK mode at 433.92 MHz. Records a signal when triggered, stores the raw sample, and replays on command via the web interface. Note: Does not work against rolling code systems (keeloq).",
+      "path": "payloads/evil_crow/garage-replay/config.json",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "nRF24L01 MouseJack Scan",
+      "description": "Evil Crow RF configuration for scanning the 2.4 GHz band for vulnerable wireless keyboards and mice using the nRF24L01+ module. Implements the MouseJack vulnerability scanner (CVE-2016-10761). Identifies unencrypted wireless HID devices within range. For research use in authorized environments only.",
+      "path": "payloads/evil_crow/mousejack-scan/config.json",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "cc2531": [
+    {
+      "name": "Zigbee Network Survey (Wireshark capture)",
+      "description": "Setup script and instructions for using CC2531 with sniffer firmware and Wireshark for passive Zigbee network enumeration. Captures beacon frames, association requests, and data frames. Identifies Zigbee PAN IDs, coordinator addresses, device types, and network topology. Requires CC2531 flashed with Zigbee sniffer firmware.",
+      "path": "payloads/cc2531/zigbee-survey/setup.sh",
+      "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "Zigbee2MQTT Bridge Setup",
+      "description": "Configuration script and instructions for setting up Zigbee2MQTT with the CC2531 coordinator dongle. Generates a zigbee2mqtt configuration.yaml with Z-Stack port, network key, and MQTT broker settings. Includes instructions for installing Zigbee2MQTT via npm on Linux/macOS and connecting to an MQTT broker.",
+      "path": "payloads/cc2531/zigbee2mqtt-setup/setup.sh",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "dwm3001cdk": [
+    {
+      "name": "UWB Ranging Demo (TWR)",
+      "description": "Two-Way Ranging (TWR) demo configuration for DWM3001CDK. Configures the DW3110 UWB transceiver for IEEE 802.15.4z HRP UWB ranging. Measures distance between two DWM3001CDK nodes. Outputs ranging results over serial CDC at 115200 baud. Requires two DWM3001CDK units — one as initiator, one as responder.",
+      "path": "payloads/dwm3001cdk/uwb-ranging/config.json",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "photon_2": [
+    {
+      "name": "IoT Sensor Data Logger (Particle Cloud)",
+      "description": "Particle firmware sketch for Photon 2 that reads ADC inputs and publishes sensor data to the Particle cloud every 30 seconds. Configures the RTL8721DM WiFi and connects to Particle cloud using the Device OS API. Data is viewable in the Particle console at console.particle.io. Flash via particle flash --usb.",
+      "path": "payloads/photon_2/sensor-logger/firmware.ino",
+      "added": "2026-03-28T00:00:00Z"
+    }
+  ],
+  "omg_cable": [],
+  "wifi_coconut": [],
+  "rubber_ducky_3": []
+}

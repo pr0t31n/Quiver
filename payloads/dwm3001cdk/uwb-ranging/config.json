@@ -1,0 +1,37 @@
+{
+  "_comment": "DWM3001CDK UWB Two-Way Ranging (TWR) Demo Configuration",
+  "_info": "Requires two DWM3001CDK units. Flash TWR demo firmware from Qorvo SDK.",
+  "firmware": "qpg_qmatter_twr_demo",
+  "uwb": {
+    "channel": 5,
+    "prf": "64MHz",
+    "preamble_length": 128,
+    "data_rate": "6.8Mbps",
+    "sts_mode": "STS_MODE_1",
+    "pdoa_mode": "PDOA_MODE_3"
+  },
+  "roles": {
+    "initiator": {
+      "role": "INITIATOR",
+      "address": "0x0001",
+      "responder_address": "0x0002",
+      "ranging_interval_ms": 100
+    },
+    "responder": {
+      "role": "RESPONDER",
+      "address": "0x0002"
+    }
+  },
+  "output": {
+    "serial_port": "CDC_UART",
+    "baud_rate": 115200,
+    "format": "distance_cm_json"
+  },
+  "_flash_instructions": [
+    "1. Install nrfjprog from Nordic: https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools",
+    "2. Download Qorvo QMatter SDK from: https://www.qorvo.com/products/p/DWM3001CDK",
+    "3. Flash initiator: nrfjprog --program twr_initiator.hex -f NRF52 --sectorerase && nrfjprog --reset -f NRF52",
+    "4. Flash responder: repeat step 3 on second unit with twr_responder.hex",
+    "5. Connect both units and monitor serial output for distance readings"
+  ]
+}

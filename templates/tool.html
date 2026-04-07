@@ -1,0 +1,1143 @@
+{% extends "base.html" %}
+{% block title %}{{ tool.name }} — Quiver{% endblock %}
+
+{% block head_extra %}
+<!-- xterm.js for SSH shell -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+/* ── Tool page layout ─────────────────────────────────────────────────────── */
+.tool-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem .75rem;
+  border-bottom: 1px solid var(--border);
+}
+.tool-header-icon { font-size: 2rem; line-height: 1; }
+.tool-header-name {
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  color: var(--accent);
+  margin: 0 0 .1rem;
+  letter-spacing: .04em;
+}
+.tool-header-sub {
+  font-size: .78rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+.breadcrumb {
+  font-size: .75rem;
+  color: var(--text-muted);
+  padding: .5rem 1.5rem 0;
+}
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+
+/* ── Tabs ─────────────────────────────────────────────────────────────────── */
+.tabs-bar {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 1.5rem;
+  margin-top: .75rem;
+}
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  padding: .6rem 1.1rem;
+  text-transform: uppercase;
+  transition: color .15s, border-color .15s;
+  margin-bottom: -1px;
+}
+.tab-btn:hover   { color: var(--text); }
+.tab-btn.active  { color: var(--accent); border-bottom-color: var(--accent); }
+
+.tab-panel { display: none; padding: 1.25rem 1.5rem 1.5rem; }
+.tab-panel.active { display: block; }
+
+/* ── Gearbox (script runner) ──────────────────────────────────────────────── */
+.gearbox-layout {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .gearbox-layout { grid-template-columns: 1fr; }
+}
+
+.console-panel {
+  background: #0d0d0d;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  height: 460px;
+  overflow-y: auto;
+  padding: .5rem .75rem;
+  font-family: var(--font-mono, 'Courier New', monospace);
+  font-size: .75rem;
+  line-height: 1.55;
+  scroll-behavior: smooth;
+}
+.console-line { white-space: pre-wrap; word-break: break-all; }
+.console-line.stdout  { color: #d4d4d4; }
+.console-line.stderr  { color: #f48771; }
+.console-line.system  { color: #569cd6; font-style: italic; }
+.console-line.ok      { color: #4ec94e; }
+.console-line.warn    { color: #e5c07b; }
+.console-line.info    { color: #56b6c2; }
+.console-line.heading {
+  color: var(--accent);
+  font-weight: 700;
+  padding: .2em 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  margin: .25em 0;
+}
+
+.controls-panel {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+.gearbox-status {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  font-size: .7rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  padding: .3rem .6rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.gearbox-status.idle    { color: var(--text-muted); }
+.gearbox-status.running { color: #4ec94e; border-color: #4ec94e; background: color-mix(in srgb, #4ec94e 12%, var(--surface)); }
+.gearbox-status.error   { color: #f48771; border-color: #f48771; background: color-mix(in srgb, #f48771 12%, var(--surface)); }
+.gearbox-status.done    { color: #569cd6; border-color: #569cd6; background: color-mix(in srgb, #569cd6 12%, var(--surface)); }
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-dot.pulse {
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: .3; }
+}
+
+.btn-ctrl {
+  width: 100%;
+  text-align: center;
+  padding: .45rem .75rem;
+  font-size: .8rem;
+}
+
+/* Payload info label */
+.payload-badge {
+  font-size: .72rem;
+  color: var(--text-muted);
+  padding: .25rem .5rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 4px);
+  word-break: break-all;
+}
+
+/* ── Progress bar ─────────────────────────────────────────────────────────── */
+#progressBarWrap {
+  display: none;
+  margin-top: .6rem;
+}
+#progressBarWrap.visible { display: block; }
+.progress-track {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  height: 10px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill {
+  background: var(--accent);
+  height: 100%;
+  transition: width .3s ease;
+  width: 0%;
+  border-radius: 20px;
+}
+.progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: .68rem;
+  color: var(--text-muted);
+  margin-top: .25rem;
+}
+
+/* ── Firmware tab ─────────────────────────────────────────────────────────── */
+.firmware-panel {
+  max-width: 580px;
+}
+.firmware-panel h2 {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--accent);
+  margin: 0 0 1.25rem;
+  letter-spacing: .04em;
+}
+.fw-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: .35rem .75rem;
+  align-items: center;
+  margin-bottom: .5rem;
+  font-size: .84rem;
+}
+.fw-label { color: var(--text-muted); font-weight: 600; }
+.fw-value { font-family: var(--font-mono, monospace); }
+.fw-badge {
+  display: inline-block;
+  padding: .15rem .5rem;
+  border-radius: 12px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+.fw-badge.up-to-date  { background: color-mix(in srgb, #4ec94e 15%, transparent); color: #4ec94e; border: 1px solid #4ec94e; }
+.fw-badge.update-avail { background: color-mix(in srgb, #e5c07b 15%, transparent); color: #e5c07b; border: 1px solid #e5c07b; }
+.fw-badge.unknown     { background: color-mix(in srgb, #888 15%, transparent); color: #888; border: 1px solid #555; }
+.fw-badge.checking    { background: color-mix(in srgb, #569cd6 15%, transparent); color: #569cd6; border: 1px solid #569cd6; }
+.fw-divider { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
+.fw-actions { display: flex; gap: .65rem; flex-wrap: wrap; margin-top: 1rem; }
+
+/* ── SSH shell tab ────────────────────────────────────────────────────────── */
+.ssh-layout {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 700px) {
+  .ssh-layout { grid-template-columns: 1fr; }
+}
+
+#xtermContainer {
+  background: #000;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 420px;
+  overflow: hidden;
+}
+.ssh-no-support {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: .9rem;
+  line-height: 1.7;
+}
+.ssh-no-support .ns-icon { font-size: 2rem; margin-bottom: .5rem; }
+
+.ssh-connect-bar {
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+}
+.ssh-status {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: .3rem .6rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  text-align: center;
+}
+.ssh-status.connected    { color: #4ec94e; border-color: #4ec94e; }
+.ssh-status.disconnected { color: var(--text-muted); }
+.ssh-status.connecting   { color: #e5c07b; border-color: #e5c07b; }
+.ssh-status.error        { color: #f48771; border-color: #f48771; }
+
+.ssh-info-row {
+  font-size: .73rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.ssh-info-row strong { color: var(--text); }
+
+/* ── Management portal tab ────────────────────────────────────────────────── */
+.mgmt-panel {
+  max-width: 680px;
+}
+.mgmt-heading {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--accent);
+  margin: 0 0 .75rem;
+  letter-spacing: .04em;
+}
+.mgmt-url-row {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .5rem .75rem;
+  margin-bottom: 1rem;
+  font-family: var(--font-mono, monospace);
+  font-size: .82rem;
+  word-break: break-all;
+}
+.mgmt-url-text { flex: 1; color: var(--text); }
+.mgmt-buttons { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+.mgmt-note {
+  font-size: .78rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: .65rem .9rem;
+}
+.mgmt-note strong { color: var(--text); }
+
+/* ── Waiting / polling overlay modal ──────────────────────────────────────── */
+#waitingModal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.78);
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  animation: fadeIn .2s ease;
+}
+#waitingModal[hidden] { display: none; }
+
+.waiting-panel {
+  background: var(--bg-panel, #1a1a1a);
+  border: 2px solid var(--border-accent, #444);
+  border-radius: var(--radius-lg, 10px);
+  width: min(600px, 94vw);
+  box-shadow: 0 8px 52px rgba(0,0,0,.8);
+  animation: slideUp .25s cubic-bezier(.34,1.56,.64,1);
+}
+.waiting-header {
+  padding: 1rem 1.5rem .75rem;
+  border-bottom: 1px solid var(--border-mid, #333);
+  display: flex;
+  align-items: center;
+  gap: .85rem;
+  background: var(--bg-panel-alt, #111);
+  border-radius: var(--radius-lg, 10px) var(--radius-lg, 10px) 0 0;
+}
+.waiting-spinner {
+  width: 22px; height: 22px; flex-shrink: 0;
+  border: 3px solid var(--border-mid, #444);
+  border-top-color: var(--accent-gold, #c9a227);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.waiting-title {
+  font-family: var(--font-display, monospace);
+  font-size: .88rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent-gold, #c9a227);
+  margin: 0;
+}
+.waiting-body { padding: 1.1rem 1.5rem 1rem; }
+.waiting-instructions {
+  font-family: var(--font-mono, monospace);
+  font-size: .84rem;
+  color: var(--text-primary, #d4d4d4);
+  background: var(--bg-input, #0d0d0d);
+  border: 1px solid var(--border-mid, #333);
+  border-radius: var(--radius, 6px);
+  padding: .75rem 1rem;
+  white-space: pre-wrap;
+  line-height: 1.65;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-bottom: .75rem;
+}
+.waiting-footer {
+  padding: .65rem 1.5rem .9rem;
+  border-top: 1px solid var(--border-dim, #222);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: .5rem;
+}
+.waiting-status {
+  font-size: .76rem;
+  color: var(--text-muted, #888);
+  font-style: italic;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="breadcrumb">
+  <a href="{{ url_for('index') }}">← Tools</a> / {{ tool.name }}
+</div>
+
+<div class="tool-header">
+  <div class="tool-header-icon">{{ tool.icon }}</div>
+  <div>
+    <div class="tool-header-name">{{ tool.name }}</div>
+    <div class="tool-header-sub">
+      {% if tool.ssh %}
+        SSH: {{ tool.ssh.user }}@{{ tool.ssh.host or '(DHCP)' }}:{{ tool.ssh.port }}
+      {% else %}
+        No SSH — hardware-only device
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Tab bar -->
+<div class="tabs-bar">
+  <button class="tab-btn active" data-tab="run">⚙ Run Script</button>
+  {% if has_ssh %}
+  <button class="tab-btn" data-tab="ssh">🖥 {{ shell_label }}</button>
+  {% endif %}
+  {% if web_url %}
+  <button class="tab-btn" data-tab="management">🌐 Management</button>
+  {% endif %}
+  <button class="tab-btn" data-tab="firmware">⬆ Firmware</button>
+</div>
+
+<!-- ──────────────── TAB: Run Script ──────────────────────────────────────── -->
+<div id="tab-run" class="tab-panel active">
+  <div class="gearbox-layout">
+    <!-- Console -->
+    <div>
+      <div id="consoleOutput" class="console-panel" aria-live="polite" aria-label="Script output"></div>
+    </div>
+
+    <!-- Controls sidebar -->
+    <div class="controls-panel">
+      <div class="gearbox-status idle" id="scriptStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusLabel">Idle</span>
+      </div>
+
+      {% if selected_payload %}
+      <div class="payload-badge">
+        <strong>Payload:</strong><br>{{ selected_payload }}
+      </div>
+      {% endif %}
+
+      <button class="btn btn-primary btn-ctrl" id="startBtn">▶ Start Script</button>
+      <button class="btn btn-danger  btn-ctrl" id="killBtn"  disabled>■ Kill</button>
+      <button class="btn btn-secondary btn-ctrl" id="clearBtn">⌫ Clear</button>
+    </div>
+  </div>
+
+  <!-- Progress bar (shown during flash/firmware operations) -->
+  <div id="progressBarWrap">
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-label">
+      <span id="progressStep"></span>
+      <span id="progressPct">0%</span>
+    </div>
+  </div>
+</div>
+
+<!-- ──────────────── TAB: SSH Shell ───────────────────────────────────────── -->
+<div id="tab-ssh" class="tab-panel">
+  {% if has_ssh %}
+  <div class="ssh-layout">
+    <div id="xtermContainer"></div>
+
+    <div class="ssh-connect-bar">
+      <div class="ssh-status disconnected" id="sshStatus">Disconnected</div>
+
+      <div class="ssh-info-row">
+        <strong>Host:</strong><br>
+        {% if ssh_needs_ip %}
+        <input type="text" id="sshHostInput" class="form-control"
+               placeholder="Enter device IP…" style="margin-top:.3rem">
+        {% else %}
+        {{ tool.ssh.host }}
+        {% endif %}
+      </div>
+      <div class="ssh-info-row">
+        <strong>User:</strong> {{ tool.ssh.user }}<br>
+        <strong>Port:</strong> {{ tool.ssh.port }}
+      </div>
+      {% if tool.ssh.note is defined and tool.ssh.note %}
+      <div class="ssh-info-row" style="color:var(--text-muted);font-style:italic">
+        {{ tool.ssh.note }}
+      </div>
+      {% endif %}
+
+      <button class="btn btn-primary  btn-ctrl" id="sshConnectBtn">Connect</button>
+      <button class="btn btn-danger   btn-ctrl" id="sshDisconnectBtn" disabled>Disconnect</button>
+    </div>
+  </div>
+  {% else %}
+  <div class="ssh-no-support">
+    <div class="ns-icon">🚫</div>
+    <strong>{{ tool.name }}</strong> does not support SSH.<br>
+    This is a hardware-only device with no management interface.
+    <br><br>
+    {% if tool_id == 'screen_crab' %}
+    Configure via MicroSD <code>config.txt</code> file.
+    {% elif tool_id == 'plunder_bug' %}
+    Use the Run Script tab to manage capture mode.
+    {% elif tool_id == 'usb_rubber_ducky' %}
+    Deploy payloads by writing DuckyScript to the SD card.
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- ──────────────── TAB: Management Portal ───────────────────────────────── -->
+{% if web_url %}
+<div id="tab-management" class="tab-panel">
+  <div class="mgmt-panel">
+    <h2 class="mgmt-heading">🌐 Management Portal</h2>
+
+    <div class="mgmt-url-row">
+      <span class="mgmt-url-text" id="mgmtUrlText">{{ web_url }}</span>
+    </div>
+
+    <div class="mgmt-buttons">
+      <a href="{{ web_url }}" target="_blank" rel="noopener" class="btn btn-primary">
+        ↗ Open in New Tab
+      </a>
+      {% if not web_url.startswith('https://') or '.' not in web_url.split('https://')[-1].split('/')[0] %}
+      {# Local/LAN address — offer proxy link #}
+      <a href="/proxy/{{ tool_id }}/" target="_blank" rel="noopener" class="btn btn-secondary">
+        🔀 Open via Quiver Proxy
+      </a>
+      {% endif %}
+    </div>
+
+    <div class="mgmt-note">
+      {% if 'particle.io' in web_url %}
+      <strong>Particle Cloud Console</strong> — Manage device firmware, view logs, and configure your Photon 2
+      at <em>console.particle.io</em>. You will need a Particle account. Use the <strong>Run Script</strong>
+      tab for local device management (firmware flashing, serial monitor).
+      {% elif '192.168.' in web_url or '172.16.' in web_url or '10.' in web_url %}
+      <strong>Local network web interface.</strong> Your browser must be on the same network
+      as this device to reach it directly. The <em>Quiver Proxy</em> button routes traffic
+      through this server — useful when the device is on a separate interface.
+      {% else %}
+      <strong>Device management portal.</strong> Open the link above to access the device's
+      built-in web interface.
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<!-- ──────────────── TAB: Firmware ────────────────────────────────────────── -->
+<div id="tab-firmware" class="tab-panel">
+  <div class="firmware-panel">
+    <h2>⬆ Firmware Status</h2>
+
+    <div class="fw-row">
+      <span class="fw-label">Device</span>
+      <span class="fw-value">{{ tool.name }}</span>
+    </div>
+    <div class="fw-row">
+      <span class="fw-label">Current version</span>
+      <span class="fw-value" id="fwCurrent">—</span>
+    </div>
+    <div class="fw-row">
+      <span class="fw-label">Latest release</span>
+      <span class="fw-value" id="fwLatest">
+        <span class="fw-badge checking" id="fwLatestBadge">Checking…</span>
+      </span>
+    </div>
+    <div class="fw-row">
+      <span class="fw-label">Status</span>
+      <span class="fw-value" id="fwStatus">
+        <span class="fw-badge unknown" id="fwStatusBadge">—</span>
+      </span>
+    </div>
+    <div class="fw-row" id="fwReleaseRow" style="display:none">
+      <span class="fw-label">Release notes</span>
+      <span class="fw-value">
+        <a id="fwReleaseLink" href="#" target="_blank" rel="noopener"
+           style="color:var(--accent);font-size:.8rem;">View on GitHub ↗</a>
+      </span>
+    </div>
+
+    <hr class="fw-divider">
+
+    <p style="font-size:.82rem;color:var(--text-muted);line-height:1.6" id="fwNote">
+      Run the <strong>Run Script</strong> tab to detect the device and check its current firmware version.
+      Use the button below to trigger an over-the-air or USB firmware update.
+    </p>
+
+    <div class="fw-actions">
+      <button class="btn btn-primary" id="fwUpdateBtn">
+        ⬆ Update Firmware
+      </button>
+      <button class="btn btn-secondary" id="fwRefreshBtn">
+        ↻ Refresh
+      </button>
+    </div>
+
+    <div id="fwUpdateProgress" style="display:none;margin-top:1rem">
+      <div class="progress-track">
+        <div class="progress-fill" id="fwProgressFill"></div>
+      </div>
+      <div class="progress-label">
+        <span id="fwProgressStep">Updating…</span>
+        <span id="fwProgressPct">0%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Waiting / polling modal (shown while script actively detects a device) -->
+<div id="waitingModal" hidden role="alertdialog" aria-modal="true" aria-label="Waiting for device">
+  <div class="waiting-panel">
+    <div class="waiting-header">
+      <div class="waiting-spinner"></div>
+      <h3 class="waiting-title">Waiting for Device…</h3>
+    </div>
+    <div class="waiting-body">
+      <pre class="waiting-instructions" id="waitingInstructions"></pre>
+    </div>
+    <div class="waiting-footer">
+      <span class="waiting-status" id="waitingStatus">Detecting…</span>
+      <button class="btn btn-secondary btn-sm" id="waitingCancelBtn">Cancel / Kill</button>
+    </div>
+  </div>
+</div>
+
+<!-- Session data for JS -->
+<script>
+const SESSION_ID   = {{ session_id | tojson }};
+const TOOL_ID      = {{ tool_id | tojson }};
+const PAYLOAD_PATH = {{ selected_payload | tojson }};
+const HAS_SSH      = {{ has_ssh | tojson }};
+const SSH_NEEDS_IP = {{ ssh_needs_ip | tojson }};
+const WEB_URL      = {{ web_url | tojson }};
+const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  // ── Tab switching ──────────────────────────────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.tab;
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + target).classList.add('active');
+      if (target === 'ssh' && HAS_SSH && !termFit) initXterm();
+    });
+  });
+
+  // ── SocketIO ───────────────────────────────────────────────────────────────
+  const socket = io({ transports: ['polling'] });
+
+  socket.on('connect', () => {
+    socket.emit('join_session', { session_id: SESSION_ID });
+  });
+
+  socket.on('session_state', data => {
+    (data.console_history || []).forEach(appendLine);
+  });
+
+  // ── Script runner ──────────────────────────────────────────────────────────
+  const consolePnl  = document.getElementById('consoleOutput');
+  const statusEl    = document.getElementById('scriptStatus');
+  const statusDot   = document.getElementById('statusDot');
+  const statusLabel = document.getElementById('statusLabel');
+  const startBtn    = document.getElementById('startBtn');
+  const killBtn     = document.getElementById('killBtn');
+  const clearBtn    = document.getElementById('clearBtn');
+
+  function appendLine(msg) {
+    const div = document.createElement('div');
+    div.className = 'console-line ' + (msg.stream || 'stdout');
+    div.textContent = msg.text || '';
+    consolePnl.appendChild(div);
+    consolePnl.scrollTop = consolePnl.scrollHeight;
+  }
+
+  function setStatus(state, label) {
+    statusEl.className = 'gearbox-status ' + state;
+    statusDot.className = 'status-dot' + (state === 'running' ? ' pulse' : '');
+    statusLabel.textContent = label;
+  }
+
+  socket.on('script_output', appendLine);
+
+  socket.on('script_started', () => {
+    setStatus('running', 'Running');
+    startBtn.disabled = true;
+    killBtn.disabled  = false;
+  });
+
+  socket.on('script_done', data => {
+    const code = data.returncode;
+    setStatus(code === 0 ? 'done' : 'error', code === 0 ? 'Done' : `Exit ${code}`);
+    startBtn.disabled = false;
+    killBtn.disabled  = true;
+    appendLine({ text: `\n— Script exited (code ${code}) —`, stream: 'system' });
+  });
+
+  socket.on('script_stopped', () => {
+    setStatus('idle', 'Stopped');
+    startBtn.disabled = false;
+    killBtn.disabled  = true;
+  });
+
+  socket.on('script_error', data => {
+    appendLine({ text: '⚠ ' + (data.error || 'Unknown error'), stream: 'stderr' });
+    setStatus('error', 'Error');
+    startBtn.disabled = false;
+    killBtn.disabled  = true;
+  });
+
+  startBtn.addEventListener('click', () => {
+    socket.emit('start_script', {
+      session_id:   SESSION_ID,
+      tool_id:      TOOL_ID,
+      payload_path: PAYLOAD_PATH,
+    });
+  });
+
+  killBtn.addEventListener('click', () => {
+    socket.emit('kill_script', { session_id: SESSION_ID });
+  });
+
+  clearBtn.addEventListener('click', () => {
+    consolePnl.innerHTML = '';
+  });
+
+  // ── Prompt modal ───────────────────────────────────────────────────────────
+  const modal      = document.getElementById('promptModal');
+  const promptText = document.getElementById('modalPromptText');
+  const optionBtns = document.getElementById('modalOptionBtns');
+  const textInput  = document.getElementById('modalTextInput');
+  const submitBtn  = document.getElementById('modalSubmitBtn');
+  const cancelBtn  = document.getElementById('modalCancelBtn');
+
+  let _currentModalType = 'text';  // track type for echo masking
+
+  function openModal(payload) {
+    const ptype    = payload.type || 'text';
+    const question = payload.question || '';
+    const def      = payload.default;
+    const options  = payload.options || [];
+
+    _currentModalType = ptype;
+
+    promptText.textContent  = question;
+    optionBtns.innerHTML    = '';
+    textInput.value         = '';
+    textInput.style.display = 'block';
+
+    if (ptype === 'menu' && options.length) {
+      textInput.style.display = 'none';
+      options.forEach((opt, idx) => {
+        const btn = document.createElement('button');
+        btn.className   = 'btn btn-secondary btn-sm modal-option-btn';
+        btn.textContent = `${idx + 1}. ${opt}`;
+        btn.addEventListener('click', () => sendAnswer(String(idx)));
+        optionBtns.appendChild(btn);
+      });
+    } else if (ptype === 'confirm') {
+      textInput.style.display = 'none';
+      ['Yes', 'No'].forEach((label, i) => {
+        const btn = document.createElement('button');
+        btn.className   = 'btn btn-secondary btn-sm modal-option-btn';
+        btn.textContent = label;
+        btn.addEventListener('click', () => sendAnswer(i === 0 ? 'y' : 'n'));
+        optionBtns.appendChild(btn);
+      });
+    } else if (ptype === 'pause') {
+      textInput.style.display = 'none';
+      const btn = document.createElement('button');
+      btn.className   = 'btn btn-primary btn-sm modal-option-btn';
+      btn.textContent = 'Continue';
+      btn.addEventListener('click', () => sendAnswer(''));
+      optionBtns.appendChild(btn);
+    } else if (ptype === 'password') {
+      // Masked password input
+      textInput.type        = 'password';
+      textInput.placeholder = 'Enter password…';
+      textInput.autocomplete = 'off';
+    } else {
+      // Plain text
+      textInput.type = 'text';
+      if (def !== undefined && def !== null && def !== '') {
+        textInput.placeholder = `Default: ${def}`;
+      }
+    }
+
+    modal.removeAttribute('hidden');
+    textInput.focus();
+  }
+
+  function closeModal() {
+    modal.setAttribute('hidden', '');
+    optionBtns.innerHTML    = '';
+    textInput.value         = '';
+    textInput.type          = 'text';    // reset to text type
+    textInput.placeholder   = '';
+    _currentModalType       = 'text';
+  }
+
+  function sendAnswer(val) {
+    const answer = val !== undefined ? val : (textInput.value.trim() || '');
+    socket.emit('script_answer', { session_id: SESSION_ID, answer });
+    // Mask passwords in the console echo — show •••• instead of the value
+    const echo = _currentModalType === 'password'
+      ? '> ' + '•'.repeat(Math.max(4, answer.length))
+      : `> ${answer}`;
+    appendLine({ text: echo, stream: 'system' });
+    closeModal();
+  }
+
+  socket.on('script_prompt', openModal);
+  socket.on('prompt_resolved', closeModal);
+
+  submitBtn.addEventListener('click', () => sendAnswer());
+  textInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); sendAnswer(); }
+  });
+  cancelBtn.addEventListener('click', () => {
+    socket.emit('kill_script', { session_id: SESSION_ID });
+    closeModal();
+  });
+  modal.addEventListener('click', e => {
+    if (e.target === modal) closeModal();
+  });
+
+  // ── Waiting / polling modal ────────────────────────────────────────────────
+  const waitingModal  = document.getElementById('waitingModal');
+  const waitingInstr  = document.getElementById('waitingInstructions');
+  const waitingStatus = document.getElementById('waitingStatus');
+  const waitingCancel = document.getElementById('waitingCancelBtn');
+
+  function openWaitingModal(text) {
+    waitingInstr.textContent  = text || '';
+    waitingStatus.textContent = 'Detecting device…';
+    waitingModal.removeAttribute('hidden');
+  }
+
+  function closeWaitingModal() {
+    waitingModal.setAttribute('hidden', '');
+    waitingStatus.textContent = 'Detecting…';
+  }
+
+  waitingCancel.addEventListener('click', () => {
+    socket.emit('kill_script', { session_id: SESSION_ID });
+    closeWaitingModal();
+  });
+
+  socket.on('script_wait_start',   data => openWaitingModal(data.text));
+  socket.on('script_wait_done',    ()   => closeWaitingModal());
+  socket.on('script_wait_timeout', ()   => closeWaitingModal());
+  socket.on('script_wait_status',  data => {
+    if (!waitingModal.hasAttribute('hidden')) {
+      waitingStatus.textContent = data.text || 'Detecting…';
+    }
+  });
+
+  // Close waiting modal if script ends while it's still open
+  socket.on('script_done',    () => closeWaitingModal());
+  socket.on('script_stopped', () => closeWaitingModal());
+  socket.on('script_error',   () => closeWaitingModal());
+
+  // ── SSH Shell ──────────────────────────────────────────────────────────────
+  let term     = null;
+  let termFit  = null;
+  const sshConnBtn = document.getElementById('sshConnectBtn');
+  const sshDiscBtn = document.getElementById('sshDisconnectBtn');
+  const sshStat    = document.getElementById('sshStatus');
+
+  function initXterm() {
+    if (term) return;
+    term = new Terminal({
+      cursorBlink: true,
+      fontFamily:  'Menlo, Consolas, "Courier New", monospace',
+      fontSize:    13,
+      theme: {
+        background: '#000000',
+        foreground: '#d4d4d4',
+        cursor:     '#d4d4d4',
+      },
+    });
+    termFit = new FitAddon.FitAddon();
+    term.loadAddon(termFit);
+    term.open(document.getElementById('xtermContainer'));
+    termFit.fit();
+
+    term.onData(data => {
+      socket.emit('ssh_input', { session_id: SESSION_ID, data });
+    });
+
+    window.addEventListener('resize', () => {
+      if (termFit) {
+        termFit.fit();
+        socket.emit('ssh_resize', {
+          session_id: SESSION_ID,
+          cols: term.cols,
+          rows: term.rows,
+        });
+      }
+    });
+  }
+
+  function setSshStatus(state, label) {
+    if (!sshStat) return;
+    sshStat.className = 'ssh-status ' + state;
+    sshStat.textContent = label;
+  }
+
+  if (sshConnBtn) {
+    sshConnBtn.addEventListener('click', () => {
+      initXterm();
+      const hostInput = document.getElementById('sshHostInput');
+      const host = hostInput ? hostInput.value.trim() : '';
+      setSshStatus('connecting', 'Connecting…');
+      sshConnBtn.disabled  = true;
+      sshDiscBtn.disabled  = false;
+      socket.emit('ssh_connect', { session_id: SESSION_ID, tool_id: TOOL_ID, host });
+    });
+  }
+
+  if (sshDiscBtn) {
+    sshDiscBtn.addEventListener('click', () => {
+      socket.emit('ssh_disconnect', { session_id: SESSION_ID });
+    });
+  }
+
+  socket.on('ssh_connected', data => {
+    setSshStatus('connected', 'Connected — ' + (data.host || ''));
+    if (term) term.focus();
+  });
+
+  socket.on('ssh_output', data => {
+    if (term) term.write(data.data);
+  });
+
+  socket.on('ssh_disconnected', () => {
+    setSshStatus('disconnected', 'Disconnected');
+    if (sshConnBtn)  sshConnBtn.disabled  = false;
+    if (sshDiscBtn)  sshDiscBtn.disabled  = true;
+    if (term) term.writeln('\r\n\x1b[33m— SSH session ended —\x1b[0m');
+  });
+
+  socket.on('ssh_error', data => {
+    setSshStatus('error', 'Error');
+    if (sshConnBtn) sshConnBtn.disabled = false;
+    if (sshDiscBtn) sshDiscBtn.disabled = true;
+    if (term) term.writeln('\r\n\x1b[31m⚠ ' + (data.error || 'SSH error') + '\x1b[0m');
+    else appendLine({ text: '⚠ SSH: ' + (data.error || 'error'), stream: 'stderr' });
+  });
+
+  // ── Progress bar ───────────────────────────────────────────────────────────
+  const progressWrap = document.getElementById('progressBarWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressStep = document.getElementById('progressStep');
+  const progressPct  = document.getElementById('progressPct');
+
+  function setProgress(pct, text, step) {
+    progressWrap.classList.add('visible');
+    progressFill.style.width = pct + '%';
+    progressStep.textContent = step || text || '';
+    progressPct.textContent  = pct + '%';
+    // Also mirror progress in firmware tab if it's open
+    const fwFill = document.getElementById('fwProgressFill');
+    const fwStep = document.getElementById('fwProgressStep');
+    const fwPct  = document.getElementById('fwProgressPct');
+    if (fwFill) {
+      fwFill.style.width    = pct + '%';
+      if (fwStep) fwStep.textContent = step || text || 'Updating…';
+      if (fwPct)  fwPct.textContent  = pct + '%';
+    }
+  }
+
+  function resetProgress() {
+    progressWrap.classList.remove('visible');
+    progressFill.style.width = '0%';
+    progressStep.textContent = '';
+    progressPct.textContent  = '0%';
+    const fwProgress = document.getElementById('fwUpdateProgress');
+    if (fwProgress) fwProgress.style.display = 'none';
+  }
+
+  socket.on('script_progress', data => {
+    setProgress(data.pct || 0, data.text || '', data.step || '');
+    // Show progress area in firmware tab too
+    const fwProgress = document.getElementById('fwUpdateProgress');
+    if (fwProgress) fwProgress.style.display = 'block';
+  });
+
+  // Reset progress bar when script ends
+  socket.on('script_done',    () => { if (progressFill && parseInt(progressFill.style.width) >= 100) setTimeout(resetProgress, 2000); else resetProgress(); });
+  socket.on('script_stopped', resetProgress);
+  socket.on('script_error',   resetProgress);
+
+  // ── Firmware tab ───────────────────────────────────────────────────────────
+  const fwCurrent     = document.getElementById('fwCurrent');
+  const fwLatestBadge = document.getElementById('fwLatestBadge');
+  const fwStatusBadge = document.getElementById('fwStatusBadge');
+  const fwReleaseRow  = document.getElementById('fwReleaseRow');
+  const fwReleaseLink = document.getElementById('fwReleaseLink');
+  const fwNote        = document.getElementById('fwNote');
+  const fwUpdateBtn   = document.getElementById('fwUpdateBtn');
+  const fwRefreshBtn  = document.getElementById('fwRefreshBtn');
+
+  // Keep track of current version reported by running scripts
+  let _fwCurrentVersion = null;
+
+  // Intercept console lines that look like firmware version reports
+  // Scripts emit: ok("Current firmware: v1.2.3") or info("Device OS: v5.6.0")
+  const _origAppendLine = appendLine;
+
+  function loadFirmwareStatus() {
+    if (fwLatestBadge) {
+      fwLatestBadge.className   = 'fw-badge checking';
+      fwLatestBadge.textContent = 'Checking…';
+    }
+    if (fwStatusBadge) {
+      fwStatusBadge.className   = 'fw-badge unknown';
+      fwStatusBadge.textContent = '—';
+    }
+
+    fetch(FIRMWARE_API)
+      .then(r => r.json())
+      .then(data => {
+        const latest = data.latest || '';
+        if (fwLatestBadge) {
+          if (latest) {
+            fwLatestBadge.className   = 'fw-badge up-to-date';
+            fwLatestBadge.textContent = latest;
+          } else {
+            fwLatestBadge.className   = 'fw-badge unknown';
+            fwLatestBadge.textContent = 'Unknown';
+          }
+        }
+        if (data.release_url && fwReleaseRow && fwReleaseLink) {
+          fwReleaseRow.style.display = '';
+          fwReleaseLink.href = data.release_url;
+        }
+        if (data.note && fwNote) {
+          fwNote.textContent = data.note;
+        }
+        // Compare if we have current version
+        updateFwStatus(latest);
+      })
+      .catch(e => {
+        if (fwLatestBadge) {
+          fwLatestBadge.className   = 'fw-badge unknown';
+          fwLatestBadge.textContent = 'Error';
+        }
+      });
+  }
+
+  function updateFwStatus(latest) {
+    if (!fwStatusBadge) return;
+    const current = _fwCurrentVersion;
+    if (!current || !latest) {
+      fwStatusBadge.className   = 'fw-badge unknown';
+      fwStatusBadge.textContent = current ? 'Latest unknown' : 'Run script to detect';
+      return;
+    }
+    // Simple version compare: strip leading 'v', split on dots
+    function verArr(v) { return v.replace(/^v/,'').split(/[.\-]/).map(n => parseInt(n)||0); }
+    const cv = verArr(current), lv = verArr(latest);
+    const maxLen = Math.max(cv.length, lv.length);
+    let cmp = 0;
+    for (let i = 0; i < maxLen; i++) {
+      const a = cv[i]||0, b = lv[i]||0;
+      if (a < b) { cmp = -1; break; }
+      if (a > b) { cmp = 1; break; }
+    }
+    if (cmp < 0) {
+      fwStatusBadge.className   = 'fw-badge update-avail';
+      fwStatusBadge.textContent = '⬆ Update available';
+      if (fwUpdateBtn) fwUpdateBtn.style.display = '';
+    } else {
+      fwStatusBadge.className   = 'fw-badge up-to-date';
+      fwStatusBadge.textContent = '✓ Up to date';
+    }
+  }
+
+  // When firmware tab is opened, load status
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.tab === 'firmware') loadFirmwareStatus();
+    });
+  });
+
+  // Listen for version info lines from script output
+  socket.on('script_output', msg => {
+    const text = (msg.text || '').toLowerCase();
+    // Patterns: "current firmware: v1.2.3", "device os: v5.6.0", "firmware version: 1.2"
+    const m = (msg.text || '').match(/(?:firmware|device os|version)[:\s]+v?([\d]+[\d.\-\w]+)/i);
+    if (m && (msg.stream === 'ok' || msg.stream === 'info')) {
+      _fwCurrentVersion = m[1];
+      if (fwCurrent) fwCurrent.textContent = 'v' + m[1];
+    }
+  });
+
+  // Firmware update button — triggers the tool script with update action
+  if (fwUpdateBtn) {
+    fwUpdateBtn.addEventListener('click', () => {
+      const fwProgress = document.getElementById('fwUpdateProgress');
+      if (fwProgress) fwProgress.style.display = 'block';
+      // Switch to Run Script tab so user can see output
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      document.querySelector('[data-tab="run"]').classList.add('active');
+      document.getElementById('tab-run').classList.add('active');
+      // Start script with firmware_update action
+      socket.emit('start_script', {
+        session_id:   SESSION_ID,
+        tool_id:      TOOL_ID,
+        payload_path: '',
+        action:       'firmware_update',
+      });
+    });
+  }
+
+  if (fwRefreshBtn) {
+    fwRefreshBtn.addEventListener('click', loadFirmwareStatus);
+  }
+
+})();
+</script>
+{% endblock %}

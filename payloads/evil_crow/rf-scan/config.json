@@ -1,0 +1,18 @@
+{
+  "_comment": "Evil Crow RF V2 — Sub-GHz RF Scan configuration",
+  "_info": "Load via the Evil Crow RF web interface at http://192.168.4.1",
+  "module": "cc1101",
+  "mode": "scan",
+  "frequencies": [
+    {"freq_mhz": 315.0,  "description": "US/CA 315 MHz — car keyfobs, garage doors"},
+    {"freq_mhz": 433.92, "description": "EU/US 433.92 MHz — most common remote controls"},
+    {"freq_mhz": 868.35, "description": "EU 868 MHz — European ISM band"},
+    {"freq_mhz": 915.0,  "description": "US 915 MHz — Z-Wave, LoRa, metering"}
+  ],
+  "modulation": "OOK",
+  "bandwidth_khz": 203,
+  "dwell_ms": 500,
+  "rssi_threshold_dbm": -80,
+  "output": "serial_and_web",
+  "save_captures": true
+}

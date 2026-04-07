@@ -1,0 +1,24 @@
+#!/bin/sh
+# ================================================================
+#  LAN Turtle Module — autossh-reverse / stop
+#  Description : Gracefully terminates the autossh reverse tunnel
+#                and cleans up the PID file.
+# ================================================================
+
+LOG=/tmp/autossh-reverse.log
+PID_FILE=/tmp/autossh-reverse.pid
+
+if [ -f "$PID_FILE" ]; then
+    PID=$(cat "$PID_FILE")
+    if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID"
+        echo "[+] AutoSSH (PID: $PID) stopped." | tee -a "$LOG"
+    else
+        echo "[*] AutoSSH PID $PID not running." | tee -a "$LOG"
+    fi
+    rm -f "$PID_FILE"
+else
+    # Fallback: kill by process name
+    pkill -f autossh 2>/dev/null || true
+    echo "[+] autossh processes terminated." | tee -a "$LOG"
+fi

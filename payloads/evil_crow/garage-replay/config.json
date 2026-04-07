@@ -1,0 +1,21 @@
+{
+  "_comment": "Evil Crow RF V2 — Garage Door / Fixed-Code Remote Replay",
+  "_warning": "Only use against systems you own or have explicit written permission to test",
+  "_info": "Load via http://192.168.4.1 → Replay tab",
+  "module": "cc1101",
+  "mode": "record_replay",
+  "frequency_mhz": 433.92,
+  "modulation": "OOK",
+  "bandwidth_khz": 203,
+  "data_rate": 3.79,
+  "record": {
+    "duration_ms": 5000,
+    "trigger": "button"
+  },
+  "replay": {
+    "repeat_count": 3,
+    "repeat_delay_ms": 200,
+    "trigger": "button"
+  },
+  "_note": "Works against fixed-code remotes. Does NOT work against rolling-code (KeeLoq, Hopping code) systems such as most modern car key fobs and high-security garage openers."
+}

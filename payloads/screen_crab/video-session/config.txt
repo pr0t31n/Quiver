@@ -1,0 +1,21 @@
+# ================================================================
+#  Screen Crab Config : video-session
+#  Use case           : Full video recording of active sessions.
+#                       Motion-triggered to conserve storage.
+#                       60-second clips on activity. Good for
+#                       capturing complex workflows, typed commands,
+#                       and multi-step processes in full context.
+#  LED                : OFF (stealth)
+#  NOTE               : Video files are large — ensure adequate
+#                       MicroSD capacity (64GB+ recommended).
+#                       Files are MP4, viewable on any OS.
+# ================================================================
+
+TRIGGER=MOTION
+CAPTURE=VIDEO
+DURATION=60
+RESOLUTION=720p
+SENSITIVITY=5
+LED=OFF
+LOOT_DIR=loot/video-session
+MAX_STORAGE=51200

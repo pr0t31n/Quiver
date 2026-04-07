@@ -1,0 +1,20 @@
+# ================================================================
+#  Screen Crab Config : stealth-slow
+#  Use case           : Extended long-term deployment (days/weeks).
+#                       2-minute interval minimises storage use
+#                       and reduces MicroSD write cycles.
+#                       Lower quality further reduces file sizes.
+#                       Suitable for physical implant left in place
+#                       for the duration of an engagement.
+#  LED                : OFF (stealth — critical for long-term)
+#  Storage            : ~1GB per day at 2-min intervals / 60% quality
+# ================================================================
+
+TRIGGER=INTERVAL
+INTERVAL=120
+CAPTURE=IMAGE
+QUALITY=60
+RESOLUTION=720p
+LED=OFF
+LOOT_DIR=loot/stealth-slow
+MAX_STORAGE=32768

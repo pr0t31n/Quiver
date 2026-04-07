@@ -1,0 +1,1131 @@
+{% extends "base.html" %}
+{% block title %}Quiver — Select Tool{% endblock %}
+
+{% block head_extra %}
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<style>
+/* ── Index page ───────────────────────────────────────────────────────────── */
+.index-hero {
+  text-align: center;
+  padding: 2.5rem 1rem 1rem;
+}
+.index-hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+  color: var(--accent);
+  margin: 0 0 .4rem;
+  letter-spacing: .05em;
+}
+.index-hero p {
+  color: var(--text-muted);
+  font-size: .9rem;
+  margin: 0;
+}
+
+/* ── Connected devices strip ─────────────────────────────────────────────── */
+#connectedStrip {
+  max-width: 900px;
+  margin: 0 auto 1rem;
+  padding: 0 1rem;
+  display: none;
+}
+#connectedStrip.has-devices { display: block; }
+
+.connected-strip-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: .6rem;
+}
+.connected-pulse {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #4ec94e;
+  flex-shrink: 0;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(78,201,78,.5); }
+  50%       { opacity: .7; box-shadow: 0 0 0 5px rgba(78,201,78,0); }
+}
+
+.connected-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.connected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  background: color-mix(in srgb, #4ec94e 10%, var(--card-bg));
+  border: 1px solid #4ec94e;
+  border-radius: 20px;
+  padding: .35rem .85rem .35rem .6rem;
+  cursor: pointer;
+  transition: background .15s, transform .1s;
+  user-select: none;
+}
+.connected-chip:hover {
+  background: color-mix(in srgb, #4ec94e 18%, var(--card-bg));
+  transform: translateY(-1px);
+}
+.connected-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #4ec94e;
+  flex-shrink: 0;
+}
+.connected-chip-icon { font-size: 1rem; line-height: 1; }
+.connected-chip-name {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.connected-chip-method {
+  font-size: .68rem;
+  color: #4ec94e;
+  background: color-mix(in srgb, #4ec94e 15%, transparent);
+  border-radius: 10px;
+  padding: .1rem .4rem;
+}
+.connected-chip-port {
+  font-size: .68rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+}
+
+.webui-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  font-size: .72rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 10px;
+  padding: .15rem .5rem;
+  text-decoration: none;
+  cursor: pointer;
+  margin-left: .2rem;
+  transition: background .15s;
+}
+.webui-btn:hover {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  text-decoration: none;
+}
+
+/* ── Selector card ────────────────────────────────────────────────────────── */
+.selector-card {
+  max-width: min(760px, calc(100vw - 2rem));
+  margin: 0 auto 2rem;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius);
+  padding: 2rem 2rem 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  font-family: var(--font-display);
+  font-size: .78rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: .4rem;
+}
+
+.form-group select,
+.form-group input[type="text"],
+.form-group input[type="file"] {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-dim);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 1rem;
+  padding: .55rem .9rem;
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.form-group select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23a8906a' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .9rem center;
+  padding-right: 2.5rem;
+}
+.form-group select:focus,
+.form-group input:focus {
+  outline: none;
+  border-color: var(--accent-gold);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.add-payload-toggle {
+  font-size: .78rem;
+  color: var(--accent-gold);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+  margin-top: .25rem;
+}
+.add-payload-toggle:hover { opacity: .8; }
+
+#addPayloadSection {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--accent-gold) 6%, var(--bg-panel-alt));
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 20%, var(--border-dim));
+  border-radius: var(--radius);
+  display: none;
+  flex-direction: column;
+  gap: .85rem;
+}
+#addPayloadSection.open { display: flex; }
+
+.btn-continue {
+  width: 100%;
+  letter-spacing: .14em;
+}
+
+.usb-hint {
+  margin-bottom: .85rem;
+  padding: .6rem .85rem;
+  background: color-mix(in srgb, var(--accent-gold) 8%, var(--bg-panel-alt));
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 35%, var(--border-dim));
+  border-radius: var(--radius);
+  font-size: .8rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── Tool grid ────────────────────────────────────────────────────────────── */
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1rem;
+  max-width: 900px;
+  margin: 0 auto 3rem;
+  padding: 0 1rem;
+}
+.tool-card {
+  position: relative;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, transform .1s, box-shadow .15s;
+  user-select: none;
+}
+.tool-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px var(--shadow);
+}
+.tool-card.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card-bg));
+}
+.tool-card.tool-connected {
+  border-color: #4ec94e;
+}
+.tool-card.tool-connected:hover {
+  border-color: #4ec94e;
+  box-shadow: 0 6px 20px color-mix(in srgb, #4ec94e 20%, var(--shadow));
+}
+.tool-icon {
+  font-size: 2rem;
+  line-height: 1;
+  margin-bottom: .5rem;
+}
+.tool-label {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: .03em;
+}
+/* Presence dot — top-right corner of card */
+.tool-status-dot {
+  position: absolute;
+  top: .55rem;
+  right: .6rem;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background .4s;
+}
+.tool-status-dot.connected {
+  background: #4ec94e;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #4ec94e 30%, transparent);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* ── Peer Quiver instances strip ─────────────────────────────────────────── */
+#peerStrip {
+  max-width: 900px;
+  margin: 0 auto 1rem;
+  padding: 0 1rem;
+  display: none;
+}
+#peerStrip.has-peers { display: block; }
+
+.peer-strip-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: .6rem;
+}
+.peer-pulse {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #5bc8f5;
+  flex-shrink: 0;
+  animation: peer-pulse 1.6s ease-in-out infinite;
+}
+@keyframes peer-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(91,200,245,.5); }
+  50%       { opacity: .7; box-shadow: 0 0 0 5px rgba(91,200,245,0); }
+}
+
+.peer-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+
+.peer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  background: color-mix(in srgb, #5bc8f5 10%, var(--card-bg));
+  border: 1px solid #5bc8f5;
+  border-radius: 20px;
+  padding: .35rem .85rem .35rem .6rem;
+  user-select: none;
+}
+.peer-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #5bc8f5;
+  flex-shrink: 0;
+}
+.peer-chip-ip {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text);
+  font-family: var(--font-mono, monospace);
+}
+.peer-chip-label {
+  font-size: .68rem;
+  color: #5bc8f5;
+  background: color-mix(in srgb, #5bc8f5 15%, transparent);
+  border-radius: 10px;
+  padding: .1rem .4rem;
+}
+.peer-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #5bc8f5;
+  background: color-mix(in srgb, #5bc8f5 12%, transparent);
+  border: 1px solid color-mix(in srgb, #5bc8f5 45%, transparent);
+  border-radius: 10px;
+  padding: .15rem .5rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s;
+}
+.peer-connect-btn:hover {
+  background: color-mix(in srgb, #5bc8f5 24%, transparent);
+  text-decoration: none;
+}
+
+/* ── Network devices strip ───────────────────────────────────────────────── */
+#netdevStrip {
+  max-width: 900px;
+  margin: 0 auto 1rem;
+  padding: 0 1rem;
+  display: none;
+}
+#netdevStrip.has-devices { display: block; }
+
+.netdev-strip-header {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: .6rem;
+}
+.netdev-pulse {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #f5a623;
+  flex-shrink: 0;
+  animation: netdev-pulse 1.6s ease-in-out infinite;
+}
+@keyframes netdev-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(245,166,35,.5); }
+  50%       { opacity: .7; box-shadow: 0 0 0 5px rgba(245,166,35,0); }
+}
+.netdev-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .6rem;
+}
+.netdev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  background: color-mix(in srgb, #f5a623 10%, var(--card-bg));
+  border: 1px solid #f5a623;
+  border-radius: 20px;
+  padding: .35rem .85rem .35rem .6rem;
+  user-select: none;
+}
+.netdev-chip-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #f5a623;
+  flex-shrink: 0;
+}
+.netdev-chip-icon { font-size: 1rem; line-height: 1; }
+.netdev-chip-name {
+  font-size: .8rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.netdev-chip-label {
+  font-size: .68rem;
+  color: #f5a623;
+  background: color-mix(in srgb, #f5a623 15%, transparent);
+  border-radius: 10px;
+  padding: .1rem .4rem;
+}
+.netdev-portal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  font-size: .72rem;
+  font-weight: 600;
+  color: #f5a623;
+  background: color-mix(in srgb, #f5a623 12%, transparent);
+  border: 1px solid color-mix(in srgb, #f5a623 45%, transparent);
+  border-radius: 10px;
+  padding: .15rem .5rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s;
+}
+.netdev-portal-btn:hover {
+  background: color-mix(in srgb, #f5a623 24%, transparent);
+  text-decoration: none;
+}
+
+/* ── Payload description box ─────────────────────────────────────────────── */
+.payload-desc-box {
+  display: none;
+  margin-top: .6rem;
+  padding: .7rem .85rem;
+  background: color-mix(in srgb, var(--accent-gold) 5%, var(--bg-panel-alt));
+  border: 1px solid color-mix(in srgb, var(--accent-gold) 18%, var(--border-dim));
+  border-radius: var(--radius);
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.payload-desc-box.visible { display: block; }
+
+.payload-select-wrapper {
+  position: relative;
+}
+
+
+/* ── Category filter bar ─────────────────────────────────────────────────── */
+.category-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  max-width: 900px;
+  margin: 0 auto .75rem;
+  padding: 0 1rem;
+  align-items: center;
+}
+.cat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  background: var(--surface, var(--card-bg));
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .05em;
+  padding: .28rem .75rem;
+  text-transform: uppercase;
+  transition: color .15s, border-color .15s, background .15s;
+  white-space: nowrap;
+}
+.cat-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.cat-btn.active {
+  background: color-mix(in srgb, var(--accent) 15%, var(--card-bg));
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.tool-card.hidden { display: none; }
+
+/* flash messages */
+.flash-msg {
+  max-width: 680px;
+  margin: 1rem auto 0;
+  padding: .6rem 1rem;
+  border-radius: var(--radius-sm, 4px);
+  font-size: .85rem;
+}
+.flash-msg.ok  { background: color-mix(in srgb, #4caf50 15%, transparent); border: 1px solid #4caf50; color: #4caf50; }
+.flash-msg.err { background: color-mix(in srgb, #f44336 15%, transparent); border: 1px solid #f44336; color: #f44336; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="index-hero">
+  <h1>Quiver</h1>
+  <p>Select a tool and optional payload, then continue to the management console.</p>
+</div>
+
+<!-- ── Connected devices strip ─────────────────────────────────────────────── -->
+<div id="connectedStrip">
+  <div class="connected-strip-header">
+    <span class="connected-pulse"></span>
+    Detected devices
+  </div>
+  <div class="connected-cards" id="connectedCards"></div>
+</div>
+
+<!-- ── Peer Quiver instances strip ──────────────────────────────────────────── -->
+<div id="peerStrip">
+  <div class="peer-strip-header">
+    <span class="peer-pulse"></span>
+    Other Quiver instances on this network
+  </div>
+  <div class="peer-cards" id="peerCards"></div>
+</div>
+
+<!-- ── Network devices strip ─────────────────────────────────────────────────── -->
+<div id="netdevStrip">
+  <div class="netdev-strip-header">
+    <span class="netdev-pulse"></span>
+    Network devices
+  </div>
+  <div class="netdev-cards" id="netdevCards"></div>
+</div>
+
+<div id="flashMsg" class="flash-msg" style="display:none"></div>
+
+<div class="selector-card">
+  <div class="form-row">
+    <!-- Tool selector -->
+    <div class="form-group">
+      <label for="toolSelect">Tool</label>
+      <select id="toolSelect">
+        <option value="">— Select a tool —</option>
+        {% for tid, tool in tools.items() %}
+        <option value="{{ tid }}">{{ tool.icon }} {{ tool.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Payload selector -->
+    <div class="form-group">
+      <label for="payloadSelect">Payload</label>
+      <div class="payload-select-wrapper">
+        <select id="payloadSelect" disabled>
+          <option value="">— Select tool first —</option>
+        </select>
+      </div>
+      <div id="payloadDesc" class="payload-desc-box"></div>
+      <button class="add-payload-toggle" id="addPayloadToggle" type="button" style="display:none">
+        + Add new payload
+      </button>
+    </div>
+
+    <!-- Add payload section (hidden by default) -->
+    <div id="addPayloadSection">
+      <div class="form-group">
+        <label for="payloadName">Payload Name</label>
+        <input type="text" id="payloadName" placeholder="e.g. Quick Recon">
+      </div>
+      <div class="form-group">
+        <label for="payloadFile">Payload File</label>
+        <input type="file" id="payloadFile">
+      </div>
+      <button class="btn btn-secondary btn-sm" id="uploadPayloadBtn" type="button">Upload &amp; Save</button>
+    </div>
+  </div>
+
+  <div id="usbHint" class="usb-hint" style="display:none"></div>
+  <button class="btn btn-primary btn-continue" id="continueBtn" disabled>Continue →</button>
+</div>
+
+<!-- Category filter bar -->
+<div class="category-bar" id="categoryBar">
+  <button class="cat-btn active" data-cat="">All</button>
+  {% for gid, grp in tool_groups.items() %}
+  <button class="cat-btn" data-cat="{{ gid }}">{{ grp.icon }} {{ grp.label }}</button>
+  {% endfor %}
+</div>
+
+<!-- All-tools quick-select grid -->
+{# Build a lookup: tool_id → list of group ids #}
+{% set tool_cats = {} %}
+{% for gid, grp in tool_groups.items() %}
+  {% for tid in grp.tools %}
+    {% if tool_cats.update({tid: (tool_cats.get(tid, []) + [gid])}) %}{% endif %}
+  {% endfor %}
+{% endfor %}
+
+<div class="tool-grid" id="toolGrid">
+  {% for tid, tool in tools.items() %}
+  <div class="tool-card"
+       data-tool="{{ tid }}"
+       data-cats="{{ tool_cats.get(tid, []) | join(' ') }}"
+       title="{{ tool.name }}">
+    <span class="tool-status-dot" id="dot-{{ tid }}"></span>
+    <div class="tool-icon">{{ tool.icon }}</div>
+    <div class="tool-label">{{ tool.name }}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Payload data injected for JS -->
+<script>
+const ALL_PAYLOADS = {{ payloads | tojson }};
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  /* ── Tool selection / payload ──────────────────────────────────────────── */
+  const toolSel     = document.getElementById('toolSelect');
+  const payloadSel  = document.getElementById('payloadSelect');
+  const payloadDesc = document.getElementById('payloadDesc');
+  const usbHint     = document.getElementById('usbHint');
+  const toggleBtn   = document.getElementById('addPayloadToggle');
+  const addSection  = document.getElementById('addPayloadSection');
+  const continueBtn = document.getElementById('continueBtn');
+  const flashMsg    = document.getElementById('flashMsg');
+  const uploadBtn   = document.getElementById('uploadPayloadBtn');
+
+  function flash(msg, type) {
+    flashMsg.textContent = msg;
+    flashMsg.className   = 'flash-msg ' + type;
+    flashMsg.style.display = 'block';
+    setTimeout(() => flashMsg.style.display = 'none', 4000);
+  }
+
+  function clearPayloadDesc() {
+    payloadDesc.textContent = '';
+    payloadDesc.classList.remove('visible');
+  }
+
+  function populatePayloads(toolId) {
+    payloadSel.innerHTML = '';
+    clearPayloadDesc();
+    const list = ALL_PAYLOADS[toolId] || [];
+    if (!toolId) {
+      payloadSel.innerHTML = '<option value="">— Select tool first —</option>';
+      payloadSel.disabled = true;
+      return;
+    }
+    const noOpt = document.createElement('option');
+    noOpt.value = ''; noOpt.textContent = '— No payload (run bare script) —';
+    payloadSel.appendChild(noOpt);
+    list.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.path;
+      opt.textContent = p.name;
+      opt.dataset.description = p.description || '';
+      payloadSel.appendChild(opt);
+    });
+    payloadSel.disabled = false;
+  }
+
+  payloadSel.addEventListener('change', function() {
+    const selected = payloadSel.options[payloadSel.selectedIndex];
+    const desc = selected && selected.dataset.description;
+    if (desc) {
+      payloadDesc.textContent = desc;
+      payloadDesc.classList.add('visible');
+    } else {
+      clearPayloadDesc();
+    }
+  });
+
+  function onToolChange() {
+    const tid = toolSel.value;
+    populatePayloads(tid);
+    toggleBtn.style.display = tid ? 'inline' : 'none';
+    continueBtn.disabled = !tid;
+    document.querySelectorAll('.tool-card').forEach(c =>
+      c.classList.toggle('selected', c.dataset.tool === tid));
+    usbHint.style.display = 'none';
+  }
+
+  toolSel.addEventListener('change', onToolChange);
+  toggleBtn.addEventListener('click', () => addSection.classList.toggle('open'));
+
+  document.querySelectorAll('.tool-card').forEach(card => {
+    card.addEventListener('click', () => {
+      toolSel.value = card.dataset.tool;
+      onToolChange();
+    });
+  });
+
+  uploadBtn.addEventListener('click', async () => {
+    const toolId = toolSel.value;
+    const name   = document.getElementById('payloadName').value.trim();
+    const file   = document.getElementById('payloadFile').files[0];
+    if (!toolId) { flash('Select a tool first.', 'err'); return; }
+    if (!name)   { flash('Enter a payload name.', 'err'); return; }
+    if (!file)   { flash('Choose a file.', 'err'); return; }
+
+    const fd = new FormData();
+    fd.append('tool_id', toolId);
+    fd.append('name', name);
+    fd.append('file', file);
+
+    try {
+      const res  = await fetch('/api/payloads/add', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.ok) {
+        ALL_PAYLOADS[toolId] = ALL_PAYLOADS[toolId] || [];
+        ALL_PAYLOADS[toolId].push({ name, path: data.path });
+        populatePayloads(toolId);
+        payloadSel.value = data.path;
+        addSection.classList.remove('open');
+        document.getElementById('payloadName').value = '';
+        document.getElementById('payloadFile').value = '';
+        flash('Payload saved.', 'ok');
+      } else {
+        flash(data.error || 'Upload failed.', 'err');
+      }
+    } catch(e) {
+      flash('Network error: ' + e, 'err');
+    }
+  });
+
+  /* Show a static save hint when a Manual (USB Drive) payload is selected.
+     USB detection is not possible server-side; the save dialog lets the user
+     navigate to their drive on their own machine. */
+  function updateUsbHint() {
+    if (toolSel.value === 'manual_usb_drive' && payloadSel.value) {
+      usbHint.className = 'usb-hint';
+      usbHint.innerHTML = '&#x1F4BE; Click <strong>Continue</strong> to open a save dialog &mdash; navigate to your USB drive to save the payload.';
+      usbHint.style.display = 'block';
+    } else {
+      usbHint.style.display = 'none';
+    }
+  }
+
+  payloadSel.addEventListener('change', updateUsbHint);
+
+  /* Save payload file via File System Access API (with <a download> fallback) */
+  async function saveToUsb(payloadPath) {
+    let data;
+    try {
+      const resp = await fetch('/api/usb/save-info?payload=' + encodeURIComponent(payloadPath));
+      data = await resp.json();
+    } catch(e) {
+      flash('Network error: ' + e, 'err');
+      return;
+    }
+    if (!data.ok) { flash(data.error || 'Could not read payload.', 'err'); return; }
+
+    const { filename, content } = data;
+
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName: filename });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+        flash('Saved: ' + filename, 'ok');
+      } catch(e) {
+        if (e.name !== 'AbortError') flash('Save failed: ' + e.message, 'err');
+      }
+    } else {
+      /* Fallback for browsers without File System Access API */
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      flash('Downloading ' + filename + ' — move it to your USB drive.', 'ok');
+    }
+  }
+
+  continueBtn.addEventListener('click', () => {
+    const toolId = toolSel.value;
+    if (!toolId) return;
+    const payload = payloadSel.value;
+    if (toolId === 'manual_usb_drive') {
+      if (!payload) { flash('Select a payload to save to USB.', 'err'); return; }
+      saveToUsb(payload);
+      return;
+    }
+    window.location.href = '/tool/' + toolId + (payload ? '?payload=' + encodeURIComponent(payload) : '');
+  });
+
+  /* ── Periodic page reload ──────────────────────────────────────────────── */
+  // Saves current tool/payload selection to sessionStorage, then reloads the
+  // page every 30 s so device, peer, and network-device detection is refreshed.
+  // Selection is restored immediately after load (see restore block below).
+  setInterval(() => {
+    const tid = toolSel.value;
+    const pid = payloadSel.value;
+    if (tid) sessionStorage.setItem('quiver_tool', tid);
+    else     sessionStorage.removeItem('quiver_tool');
+    if (pid) sessionStorage.setItem('quiver_payload', pid);
+    else     sessionStorage.removeItem('quiver_payload');
+    location.reload();
+  }, 30000);
+
+  // Restore selection saved by a pre-reload snapshot
+  (function restoreSelection() {
+    const tid = sessionStorage.getItem('quiver_tool');
+    const pid = sessionStorage.getItem('quiver_payload');
+    if (!tid) return;
+    toolSel.value = tid;
+    onToolChange();
+    if (pid) {
+      payloadSel.value = pid;
+      payloadSel.dispatchEvent(new Event('change'));
+    }
+  })();
+
+
+  /* ── Device presence detection ────────────────────────────────────────── */
+  // Live status state: toolId → {connected, method, port, web_url, name, icon}
+  const _status = {};
+
+  /**
+   * Probe webUrl from the client-side browser.  Defaults to the direct link.
+   * Only falls back to the Quiver reverse proxy on a genuine routing timeout
+   * (AbortError) — meaning packets never arrived and the device is not routable
+   * from this browser.  Other fetch failures (SSL cert errors, connection
+   * refused, mixed-content blocks) indicate the network path exists and the
+   * direct link will work, so those are ignored.
+   */
+  function _resolvePortalHref(webUrl, proxyPath, el) {
+    if (!webUrl) return;
+    el.href = webUrl;   // default: direct link
+
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 2500);
+
+    fetch(webUrl, { mode: 'no-cors', signal: ctrl.signal })
+      .then(() => clearTimeout(timer))
+      .catch(err => {
+        clearTimeout(timer);
+        if (err.name === 'AbortError') {
+          // Timed out — device is not routable from this browser; use proxy.
+          el.href = proxyPath;
+        }
+        // Any other error: the TCP/IP path exists (SSL issue, port closed,
+        // blocked fetch, etc.).  Keep the direct link — the browser can still
+        // navigate there even if this fetch could not complete.
+      });
+  }
+
+  const strip      = document.getElementById('connectedStrip');
+  const chipsList  = document.getElementById('connectedCards');
+
+  const METHOD_LABELS = {
+    ssh:    'SSH',
+    serial: 'Serial',
+    usb:    'USB',
+    wifi:   'WiFi',
+  };
+
+  function navigateTo(toolId) {
+    toolSel.value = toolId;
+    onToolChange();
+    // Scroll up to the selector
+    document.querySelector('.selector-card').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  function buildChip(toolId, st) {
+    const chip = document.createElement('div');
+    chip.className   = 'connected-chip';
+    chip.dataset.tool = toolId;
+
+    const dot  = document.createElement('span');
+    dot.className = 'connected-chip-dot';
+
+    const icon = document.createElement('span');
+    icon.className   = 'connected-chip-icon';
+    icon.textContent = st.icon;
+
+    const name = document.createElement('span');
+    name.className   = 'connected-chip-name';
+    name.textContent = st.name;
+
+    chip.append(dot, icon, name);
+
+    if (st.method) {
+      const badge = document.createElement('span');
+      badge.className   = 'connected-chip-method';
+      badge.textContent = METHOD_LABELS[st.method] || st.method;
+      chip.appendChild(badge);
+    }
+
+    if (st.port) {
+      const portEl = document.createElement('span');
+      portEl.className   = 'connected-chip-port';
+      portEl.textContent = st.port;
+      chip.appendChild(portEl);
+    }
+
+    // Clicking the chip selects the tool
+    chip.addEventListener('click', e => {
+      if (e.target.closest('.webui-btn')) return;
+      navigateTo(toolId);
+    });
+
+    // Web UI button — direct link by default, proxy fallback if unreachable
+    if (st.web_url) {
+      const link = document.createElement('a');
+      link.className = 'webui-btn';
+      link.target    = '_blank';
+      link.rel       = 'noopener noreferrer';
+      link.innerHTML = '&#x1F310; Web UI';
+      chip.appendChild(link);
+      _resolvePortalHref(st.web_url, '/proxy/' + toolId + '/', link);
+    }
+
+    return chip;
+  }
+
+  function applyStatus(toolId, st) {
+    _status[toolId] = st;
+
+    // Update dot on grid card
+    const dot = document.getElementById('dot-' + toolId);
+    if (dot) dot.className = 'tool-status-dot' + (st.connected ? ' connected' : '');
+
+    // Update card border
+    const card = document.querySelector('.tool-card[data-tool="' + toolId + '"]');
+    if (card) card.classList.toggle('tool-connected', st.connected);
+
+    // Update dropdown option label
+    const opt = toolSel.querySelector('option[value="' + toolId + '"]');
+    if (opt) {
+      const baseName = st.icon + ' ' + st.name;
+      opt.textContent = st.connected ? '● ' + baseName : baseName;
+    }
+
+    // Rebuild strip
+    rebuildStrip();
+  }
+
+  function rebuildStrip() {
+    chipsList.innerHTML = '';
+    const connected = Object.entries(_status).filter(([, s]) => s.connected);
+    if (connected.length === 0) {
+      strip.classList.remove('has-devices');
+      return;
+    }
+    strip.classList.add('has-devices');
+    connected.forEach(([tid, st]) => chipsList.appendChild(buildChip(tid, st)));
+  }
+
+  // Socket.IO
+  const socket = io({ transports: ['polling'] });
+
+  socket.on('connect', () => {
+    // Request full snapshot on connect / reconnect
+    socket.emit('request_device_status');
+    socket.emit('request_peer_instances');
+    socket.emit('request_network_devices');
+  });
+
+  socket.on('device_status_snapshot', data => {
+    Object.entries(data).forEach(([tid, st]) => applyStatus(tid, st));
+  });
+
+  socket.on('device_status_update', data => {
+    applyStatus(data.tool_id, { ...data.status, name: data.name, icon: data.icon });
+  });
+
+  /* ── Peer Quiver instance discovery ─────────────────────────────────────── */
+  const peerStrip = document.getElementById('peerStrip');
+  const peerCards = document.getElementById('peerCards');
+
+  function buildPeerChip(peer) {
+    const chip = document.createElement('div');
+    chip.className = 'peer-chip';
+
+    const dot = document.createElement('span');
+    dot.className = 'peer-chip-dot';
+
+    const ipEl = document.createElement('span');
+    ipEl.className   = 'peer-chip-ip';
+    ipEl.textContent = peer.ip;
+
+    const label = document.createElement('span');
+    label.className   = 'peer-chip-label';
+    label.textContent = 'Quiver';
+
+    const btn = document.createElement('a');
+    btn.className  = 'peer-connect-btn';
+    btn.href       = peer.url;
+    btn.target     = '_blank';
+    btn.rel        = 'noopener noreferrer';
+    btn.innerHTML  = '&#x1F517; Connect';
+
+    chip.append(dot, ipEl, label, btn);
+    return chip;
+  }
+
+  function rebuildPeerStrip(peers) {
+    peerCards.innerHTML = '';
+    if (!peers || peers.length === 0) {
+      peerStrip.classList.remove('has-peers');
+      return;
+    }
+    peerStrip.classList.add('has-peers');
+    peers.forEach(p => peerCards.appendChild(buildPeerChip(p)));
+  }
+
+  socket.on('peer_instances_snapshot', data => {
+    rebuildPeerStrip(data.peers || []);
+  });
+
+  socket.on('peer_instances_update', data => {
+    rebuildPeerStrip(data.peers || []);
+  });
+
+  /* ── Network device detection ────────────────────────────────────────────── */
+  const netdevStrip = document.getElementById('netdevStrip');
+  const netdevCards = document.getElementById('netdevCards');
+
+  // Local cache: id → device data
+  const _netdevs = {};
+
+  function buildNetdevChip(dev) {
+    const chip = document.createElement('div');
+    chip.className = 'netdev-chip';
+
+    const dot = document.createElement('span');
+    dot.className = 'netdev-chip-dot';
+
+    const icon = document.createElement('span');
+    icon.className   = 'netdev-chip-icon';
+    icon.textContent = dev.icon;
+
+    const name = document.createElement('span');
+    name.className   = 'netdev-chip-name';
+    name.textContent = dev.name;
+
+    const label = document.createElement('span');
+    label.className   = 'netdev-chip-label';
+    label.textContent = 'Network';
+
+    const btn = document.createElement('a');
+    btn.className  = 'netdev-portal-btn';
+    btn.target     = '_blank';
+    btn.rel        = 'noopener noreferrer';
+    btn.innerHTML  = '&#x2699;&#xFE0F; Management Portal';
+    _resolvePortalHref(dev.web_url, '/proxy/' + dev.id + '/', btn);
+
+    chip.append(dot, icon, name, label, btn);
+    return chip;
+  }
+
+  function rebuildNetdevStrip() {
+    netdevCards.innerHTML = '';
+    const alive = Object.values(_netdevs).filter(d => d.connected);
+    if (alive.length === 0) {
+      netdevStrip.classList.remove('has-devices');
+      return;
+    }
+    netdevStrip.classList.add('has-devices');
+    alive.forEach(d => netdevCards.appendChild(buildNetdevChip(d)));
+  }
+
+  function applyNetdev(dev) {
+    _netdevs[dev.id] = dev;
+    rebuildNetdevStrip();
+  }
+
+  socket.on('netdev_snapshot', devs => {
+    devs.forEach(d => applyNetdev(d));
+  });
+
+  socket.on('netdev_update', dev => {
+    applyNetdev(dev);
+  });
+
+  /* ── Category filter bar ─────────────────────────────────────────────────── */
+  const catBtns  = document.querySelectorAll('.cat-btn');
+  const toolCards = document.querySelectorAll('.tool-card');
+
+  catBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      catBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const cat = btn.dataset.cat;
+      toolCards.forEach(card => {
+        if (!cat) {
+          card.classList.remove('hidden');
+        } else {
+          const cats = (card.dataset.cats || '').split(' ');
+          card.classList.toggle('hidden', !cats.includes(cat));
+        }
+      });
+    });
+  });
+})();
+</script>
+{% endblock %}

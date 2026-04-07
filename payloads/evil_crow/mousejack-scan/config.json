@@ -1,0 +1,19 @@
+{
+  "_comment": "Evil Crow RF V2 — MouseJack (nRF24L01+) Wireless HID Scanner",
+  "_reference": "CVE-2016-10761 — https://www.bastille.net/research/vulnerabilities/mousejack",
+  "_warning": "For authorized security research only",
+  "module": "nrf24",
+  "mode": "mousejack_scan",
+  "channels": "all_2400_2525",
+  "channel_hop_ms": 2,
+  "scan_duration_seconds": 30,
+  "identify_vendor": true,
+  "output": "table",
+  "_targets": [
+    "Unifying receivers (Logitech)",
+    "Microsoft wireless keyboards/mice (2.4 GHz non-BLE)",
+    "AmazonBasics wireless keyboards/mice",
+    "Kensington wireless devices"
+  ],
+  "_note": "Detected devices showing 'unencrypted' status are potentially vulnerable to keystroke injection. Use Evil Crow RF web interface to load and run this configuration."
+}

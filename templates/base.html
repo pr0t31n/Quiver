@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en" data-palette="tuxedo" data-mode="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Quiver{% endblock %}</title>
+  <!-- Restore theme immediately to eliminate flash of wrong theme -->
+  <script>
+    (function(){
+      var PALETTES = ['forge','frigid','futuristic','tuxedo','bloom','retro','prism','jarvis','jarhead','speakeasy','hogwarts','rivendell','coruscant','meridian','alabaster','noir','oldglory','alchemist','doom','lcars'];
+      try {
+        var p = localStorage.getItem('gauntlet-palette');
+        var m = localStorage.getItem('gauntlet-mode');
+        var html = document.documentElement;
+        if (p && PALETTES.indexOf(p) !== -1) html.setAttribute('data-palette', p);
+        else html.setAttribute('data-palette', 'tuxedo');
+        if (m === 'light' || m === 'dark') html.setAttribute('data-mode', m);
+        else html.setAttribute('data-mode', 'light');
+      } catch(e) {}
+    })();
+  </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 88' fill='none'%3E%3Cline x1='32' y1='44' x2='27' y2='15' stroke='%23c8921f' stroke-width='2' stroke-linecap='round' opacity='.7'/%3E%3Cpolygon points='27,12 22,22 32,19' fill='%23c8921f' opacity='.7'/%3E%3Cline x1='44' y1='44' x2='44' y2='11' stroke='%23c8921f' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpolygon points='44,8 39,19 49,19' fill='%23c8921f'/%3E%3Cline x1='56' y1='44' x2='61' y2='15' stroke='%23c8921f' stroke-width='2' stroke-linecap='round' opacity='.7'/%3E%3Cpolygon points='61,12 56,22 66,19' fill='%23c8921f' opacity='.7'/%3E%3Cpath d='M29,44 Q28,70 30,82 L58,82 Q60,70 59,44 Z' fill='%23c8921f' opacity='.2' stroke='%23c8921f' stroke-width='2'/%3E%3Cellipse cx='44' cy='44' rx='15' ry='4.5' fill='%23c8921f' opacity='.25' stroke='%23c8921f' stroke-width='1.8'/%3E%3Crect x='29' y='59' width='30' height='5' rx='2.5' fill='none' stroke='%23c8921f' stroke-width='1.5' opacity='.4'/%3E%3Cellipse cx='44' cy='82' rx='14' ry='4' fill='%23c8921f' opacity='.2' stroke='%23c8921f' stroke-width='1.5'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+
+<!-- ░░ Navigation ░░ -->
+<nav class="nav-bar" role="navigation" aria-label="Main navigation">
+  <div class="nav-brand">
+    <svg class="nav-gear" viewBox="0 0 88 88" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <!-- Three arrows, fanned out of quiver -->
+      <!-- Left arrow, leaning left -->
+      <line x1="33" y1="45" x2="27" y2="14"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".65"/>
+      <polygon points="27,10 22,21 33,18" fill="currentColor" opacity=".65"/>
+      <!-- Center arrow, straight up (tallest) -->
+      <line x1="44" y1="45" x2="44" y2="10"
+            stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity=".9"/>
+      <polygon points="44,6 39,18 49,18" fill="currentColor" opacity=".9"/>
+      <!-- Right arrow, leaning right -->
+      <line x1="55" y1="45" x2="61" y2="14"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity=".65"/>
+      <polygon points="61,10 55,21 66,18" fill="currentColor" opacity=".65"/>
+      <!-- Quiver body (tapered cylinder) -->
+      <path d="M29,44 C28,58 28,72 30,83 L58,83 C60,72 60,58 59,44 Z"
+            fill="currentColor" opacity=".12"
+            stroke="currentColor" stroke-width="2"/>
+      <!-- Top rim (ellipse suggesting cylinder opening) -->
+      <ellipse cx="44" cy="44" rx="15" ry="4.5"
+               fill="currentColor" opacity=".2"
+               stroke="currentColor" stroke-width="1.8"/>
+      <!-- Strap band -->
+      <rect x="29" y="59" width="30" height="5" rx="2.5"
+            fill="none" stroke="currentColor" stroke-width="1.5" opacity=".45"/>
+      <!-- Bottom cap -->
+      <ellipse cx="44" cy="83" rx="14" ry="3.5"
+               fill="currentColor" opacity=".22"
+               stroke="currentColor" stroke-width="1.5"/>
+    </svg>
+    <div>
+      <a href="{{ url_for('index') }}" class="nav-title">Quiver</a>
+      <div class="nav-subtitle">Pentest Hardware Manager</div>
+    </div>
+  </div>
+
+  <div class="nav-actions">
+    {% block nav_extra %}{% endblock %}
+
+    <div class="palette-picker" id="palettePicker" role="combobox" aria-expanded="false"
+         aria-label="Select colour palette" tabindex="0">
+      <span class="palette-picker-swatches" id="palettePickerSwatches"></span>
+      <span class="palette-picker-label"  id="palettePickerLabel">Forge</span>
+      <span class="palette-picker-caret">▾</span>
+      <ul class="palette-picker-dropdown" id="palettePickerDropdown" role="listbox">
+      </ul>
+    </div>
+    <select class="palette-select" id="paletteSelect" aria-hidden="true"
+            style="position:absolute;opacity:0;pointer-events:none;width:0;height:0">
+      <option value="forge">Forge</option>
+      <option value="frigid">Frigid</option>
+      <option value="futuristic">Futuristic</option>
+      <option value="tuxedo">Tuxedo</option>
+      <option value="bloom">Bloom</option>
+      <option value="retro">Retro</option>
+      <option value="prism">Prism</option>
+      <option value="jarvis">JARVIS</option>
+      <option value="jarhead">Jarhead</option>
+      <option value="speakeasy">Speakeasy</option>
+      <option value="hogwarts">Hogwarts</option>
+      <option value="rivendell">Rivendell</option>
+      <option value="coruscant">Coruscant</option>
+      <option value="meridian">Meridian</option>
+      <option value="alabaster">Alabaster</option>
+      <option value="noir">Noir</option>
+      <option value="oldglory">Old Glory</option>
+      <option value="alchemist">Alchemist</option>
+      <option value="doom">DOOM</option>
+      <option value="lcars">LCARS</option>
+    </select>
+
+    <button class="theme-toggle" id="themeToggle" title="Toggle dark / light mode" aria-label="Toggle color mode">
+      <div class="toggle-track">
+        <div class="toggle-thumb">
+          <svg class="icon-sun" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="8" cy="8" r="3" fill="currentColor"/>
+            <line x1="8" y1="1"  x2="8" y2="3"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="8" y1="13" x2="8" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="1"  y1="8" x2="3"  y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="13" y1="8" x2="15" y2="8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="3.22"  y1="3.22"  x2="4.64"  y2="4.64"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="11.36" y1="11.36" x2="12.78" y2="12.78" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="3.22"  y1="12.78" x2="4.64"  y2="11.36" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            <line x1="11.36" y1="4.64"  x2="12.78" y2="3.22"  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M6 .278a.77.77 0 01.08.858 7.2 7.2 0 00-.878 3.46c0 4.021 3.278 7.277 7.318 7.277.527 0 1.04-.055 1.533-.16a.787.787 0 01.81.316.733.733 0 01-.031.893A8.349 8.349 0 018.344 16C3.734 16 0 12.286 0 7.71 0 4.266 2.114 1.312 5.124.06A.752.752 0 016 .278z"/>
+          </svg>
+        </div>
+      </div>
+      <span class="toggle-label" id="modeLabel">Dark</span>
+    </button>
+  </div>
+</nav>
+
+<!-- ░░ Main Content ░░ -->
+<main class="main-content" id="main">
+  {% block content %}{% endblock %}
+</main>
+
+<!-- ░░ Footer ░░ -->
+<footer class="app-footer" role="contentinfo">
+  <span class="footer-ornament">⚙</span>
+  <span>Quiver — Pentest Hardware Manager</span>
+  <span class="footer-ornament">⚙</span>
+</footer>
+
+<!-- ░░ Prompt Modal ░░ -->
+<div class="modal-backdrop" id="promptModal" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <span class="modal-gear spin" aria-hidden="true">⚙</span>
+      <h3 class="modal-title" id="modalTitle">Input Required</h3>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-prompt" id="modalPromptText"></pre>
+      <div class="modal-option-btns" id="modalOptionBtns"></div>
+      <div class="form-group">
+        <input type="text" id="modalTextInput" class="form-control"
+               placeholder="Type your response and press Enter…" autocomplete="off">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary btn-sm" id="modalCancelBtn">Cancel / Kill</button>
+      <button class="btn btn-primary btn-sm" id="modalSubmitBtn">
+        <span>Send Response</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<script>
+window._esc = function(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+};
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

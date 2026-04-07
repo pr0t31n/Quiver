@@ -1,0 +1,11 @@
+# Title: Ethernet Mode
+# Description: Sets Bash Bunny to ECM Ethernet mode for host internet sharing.
+#   Use this in switch position 1 or 2 before running the management script
+#   to allow SSH and internet access from macOS via bridge100 (DHCP).
+# Author: Quiver
+# Version: 1.0
+
+LED SETUP
+ATTACKMODE ECM_ETHERNET
+CLIENT
+LED FINISH
