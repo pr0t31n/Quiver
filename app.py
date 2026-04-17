@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 import concurrent.futures
 import ipaddress
@@ -90,6 +90,10 @@ socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
 @app.after_request
 def _security_headers(response):
+    if "text/html" in response.content_type:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return _auth.apply_security_headers(response)
 
 
@@ -1351,6 +1355,12 @@ def _buf_append(buf: dict, key: str, item):
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
+
+@app.route("/api/nexus-status")
+def api_nexus_status():
+    """Unauthenticated status probe for the Nexus hub."""
+    return jsonify({"app": "quiver", "tool": "quiver", "hostname": _socket.gethostname(), "scanning": False, "version": VERSION})
+
 
 @app.route("/", methods=["GET"])
 def index():
