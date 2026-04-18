@@ -6,18 +6,20 @@
   <title>Login — Quiver</title>
   <script>
     (function(){
-      var PALETTES=['forge','frigid','futuristic','tuxedo','bloom','retro','prism',
-                   'jarvis','jarhead','speakeasy','hogwarts','rivendell','coruscant',
-                   'meridian','alabaster','noir','oldglory','alchemist','doom','lcars'];
+      var PALETTES=['tuxedo','meridian','alabaster','noir','leadership','blueprint','resume',
+                   'foundry','forge','frigid','futuristic','bloom','prism','ember','oldglory','alchemist','speakeasy','jarhead',
+                   'coruscant','retro','jarvis','hal9000','neuromancer','deepspace','bladerunner','synthwave','hogwarts','rivendell','lcars',
+                   'espresso','terracotta','sage','blush'];
       try {
-        var p=localStorage.getItem('gauntlet-palette');
-        var m=localStorage.getItem('gauntlet-mode');
+        var p=localStorage.getItem('quiver-palette');
+        var m=localStorage.getItem('quiver-mode');
         var h=document.documentElement;
-        if(p&&PALETTES.indexOf(p)!==-1)h.setAttribute('data-palette',p);
-        if(m==='light'||m==='dark')h.setAttribute('data-mode',m);
+        h.setAttribute('data-palette',(p&&PALETTES.indexOf(p)!==-1)?p:'resume');
+        h.setAttribute('data-mode',(m==='light'||m==='dark')?m:'light');
       }catch(e){}
     })();
   </script>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 88 88' fill='none'%3E%3Cline x1='33' y1='45' x2='27' y2='14' stroke='%23c8a860' stroke-width='2' stroke-linecap='round' opacity='.8'/%3E%3Cpolygon points='27,10 22,21 33,18' fill='%23c8a860' opacity='.8'/%3E%3Cline x1='44' y1='45' x2='44' y2='10' stroke='%23c8a860' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpolygon points='44,6 39,18 49,18' fill='%23c8a860'/%3E%3Cline x1='55' y1='45' x2='61' y2='14' stroke='%23c8a860' stroke-width='2' stroke-linecap='round' opacity='.8'/%3E%3Cpolygon points='61,10 55,21 66,18' fill='%23c8a860' opacity='.8'/%3E%3Cpath d='M29,44 C28,58 28,72 30,83 L58,83 C60,72 60,58 59,44 Z' fill='%23c8a860' opacity='.15' stroke='%23c8a860' stroke-width='2'/%3E%3Cellipse cx='44' cy='44' rx='15' ry='4.5' fill='%23c8a860' opacity='.2' stroke='%23c8a860' stroke-width='1.8'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap">

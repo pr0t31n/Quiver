@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 
 import concurrent.futures
 import ipaddress
@@ -83,7 +83,7 @@ app.config["SECRET_KEY"]               = _auth.load_secret_key()
 app.config["SESSION_COOKIE_SECURE"]    = False  # self-signed cert; HTTPS enforced server-side
 app.config["SESSION_COOKIE_HTTPONLY"]  = True
 app.config["SESSION_COOKIE_SAMESITE"]  = "Lax"
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=8)
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(minutes=30)
 _auth.init_auth()
 socketio = SocketIO(app, async_mode="threading", cors_allowed_origins="*")
 
@@ -2481,6 +2481,14 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/api/session_ping", methods=["POST"])
+def session_ping():
+    if not session.get("authenticated"):
+        return jsonify({"ok": False}), 401
+    session.modified = True
+    return jsonify({"ok": True})
 
 
 @app.route("/auth/change-password", methods=["GET", "POST"])
