@@ -1063,6 +1063,7 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
       fwStatusBadge.className   = 'fw-badge unknown';
       fwStatusBadge.textContent = '—';
     }
+    if (fwCurrent && !_fwCurrentVersion) fwCurrent.textContent = 'Detecting…';
 
     fetch(FIRMWARE_API)
       .then(r => r.json())
@@ -1083,6 +1084,13 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
         }
         if (data.note && fwNote) {
           fwNote.textContent = data.note;
+        }
+        // Passive device probe result (current firmware on the board)
+        if (data.current) {
+          _fwCurrentVersion = String(data.current);
+          if (fwCurrent) fwCurrent.textContent = _fwCurrentVersion.replace(/^v?/, 'v');
+        } else if (fwCurrent && !_fwCurrentVersion) {
+          fwCurrent.textContent = '—';
         }
         // Compare if we have current version
         updateFwStatus(latest);

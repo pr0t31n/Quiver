@@ -131,6 +131,45 @@ def _check_udev_rules():
 
 # ── Tool checks ───────────────────────────────────────────────────────────────
 
+def probe_fw_version_json() -> None:
+    """Passive: read the running Sniffle firmware version over serial and print
+    JSON. Read-only — no flashing. Lets the Firmware tab show what's on the board
+    before the operator prepares to flash."""
+    import json
+    out = {"installed": False, "version": None, "raw": "", "note": ""}
+    cli = get_firmware_dir("cc26x2r1") / "Sniffle" / "python_cli"
+    if not cli.exists():
+        out["note"] = "Sniffle host tooling not present — run the firmware download first."
+        print(json.dumps(out)); return
+    if str(cli) not in sys.path:
+        sys.path.insert(0, str(cli))
+    try:
+        from sniffle.sniffle_hw import SniffleHW
+    except Exception as e:
+        out["note"] = f"Sniffle Python package unavailable ({e})."
+        print(json.dumps(out)); return
+    hw = None
+    try:
+        hw = SniffleHW(None, timeout=0.1)          # auto-detects the XDS110 port
+        ver = hw.probe_fw_version()
+        if ver is not None:
+            out["installed"] = True
+            out["version"] = f"{ver.major}.{ver.minor}.{ver.revision}"
+            out["raw"] = str(ver)
+            out["note"] = f"Sniffle detected (API level {ver.api_level})."
+        else:
+            out["note"] = "Board reachable but not running Sniffle (no version response)."
+    except Exception as e:
+        out["note"] = f"Board not detected on serial / probe failed ({e})."
+    finally:
+        try:
+            if hw is not None:
+                hw.ser.close()
+        except Exception:
+            pass
+    print(json.dumps(out))
+
+
 def _sniffle_dir() -> Path:
     """Directory where the Sniffle repo is cloned for this tool."""
     return get_firmware_dir("cc26x2r1") / "Sniffle"
@@ -632,4 +671,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--probe-fw-version" in sys.argv:
+        probe_fw_version_json()
+        sys.exit(0)
     main()

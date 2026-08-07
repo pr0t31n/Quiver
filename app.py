@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.6.0"
+VERSION = "1.7.0"
 
 import concurrent.futures
 import ipaddress
@@ -262,6 +262,8 @@ TOOLS = {
         "icon":   "📡",
         "ssh":    None,
         "shell":  {"type": "none"},
+        "github_repo": "greatscottgadgets/hackrf",
+        "fw_probe": True,   # passive: hackrf_info firmware version
         "usb":    {
             "vid_pids":    [(0x1D50, 0x6089)],
             "dfu_vid_pid": (0x1FC9, 0x000C),
@@ -413,6 +415,8 @@ TOOLS = {
         "icon":   "🔵",
         "ssh":    None,
         "shell":  {"type": "none"},
+        "github_repo": "greatscottgadgets/ubertooth",
+        "fw_probe": True,   # passive: ubertooth-util -v firmware version
         "usb":    {
             "vid_pids":    [(0x1D50, 0x6002)],
             "dfu_vid_pid": (0x1D50, 0x6003),
@@ -829,6 +833,8 @@ TOOLS = {
         "icon":   "📶",
         "ssh":    None,
         "shell":  {"type": "none"},
+        "github_repo": "nccgroup/Sniffle",
+        "fw_probe": True,   # passive: Sniffle probe_fw_version() over serial
         "usb": {
             "vid_pids": [(0x0451, 0xBEF3)],   # XDS110 debug probe
         },
@@ -841,6 +847,8 @@ TOOLS = {
         "icon":   "📶",
         "ssh":    None,
         "shell":  {"type": "none"},
+        "github_repo": "nccgroup/Sniffle",
+        "fw_probe": True,   # passive: Sniffle probe_fw_version() over serial
         "usb": {
             "vid_pids": [(0x0451, 0xBEF3)],   # XDS110 debug probe
         },
@@ -1500,6 +1508,47 @@ def api_firmware_status(tool_id: str):
         result["release_url"] = data.get("html_url", "")
     except Exception as e:
         result["note"] = f"GitHub check failed: {e}"
+
+    # Passive current-firmware probe (read-only — no flashing). Runs the tool's
+    # module in --probe-fw-version mode; it prints one small JSON blob and exits.
+    # This is what lets the Firmware tab show the installed version WITHOUT the
+    # operator running the full script or risking a flash.
+    if tool.get("fw_probe"):
+        try:
+            script_path = BASE_DIR / tool["script"]
+            proc = _sp.run(
+                [sys.executable, str(script_path), "--probe-fw-version"],
+                cwd=str(BASE_DIR), capture_output=True, text=True, timeout=15,
+            )
+            blob = ""
+            for ln in reversed((proc.stdout or "").splitlines()):
+                ln = ln.strip()
+                if ln.startswith("{") and ln.endswith("}"):
+                    blob = ln
+                    break
+            if blob:
+                pj = _json.loads(blob)
+                result["installed"] = bool(pj.get("installed"))
+                result["current"]   = pj.get("version")
+                pnote = pj.get("note", "")
+                if pnote:
+                    result["note"] = (f"{result['note']} {pnote}".strip()
+                                      if result["note"] else pnote)
+                cur, lat = result.get("current"), result.get("latest")
+                if cur and lat:
+                    import re as _re
+                    ca = [int(x) for x in _re.findall(r"\d+", cur)]
+                    la = [int(x) for x in _re.findall(r"\d+", lat)]
+                    n = max(len(ca), len(la))
+                    ca += [0] * (n - len(ca))
+                    la += [0] * (n - len(la))
+                    result["up_to_date"] = ca >= la
+            elif not result["note"]:
+                result["note"] = "Firmware probe returned no data."
+        except _sp.TimeoutExpired:
+            result["note"] = (f"{result['note']} Firmware probe timed out.").strip()
+        except Exception as e:
+            result["note"] = (f"{result['note']} Firmware probe error: {e}").strip()
 
     return jsonify(result)
 

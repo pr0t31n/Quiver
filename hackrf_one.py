@@ -470,4 +470,14 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--probe-fw-version" in sys.argv:
+        import json
+        _v = _get_current_version()
+        print(json.dumps({
+            "installed": bool(_v),
+            "version": _v or None,
+            "note": "hackrf_info firmware version." if _v
+                    else "HackRF not detected (hackrf_info returned no version).",
+        }))
+        sys.exit(0)
     main()

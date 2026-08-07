@@ -574,4 +574,14 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--probe-fw-version" in sys.argv:
+        import json
+        _v = _get_current_version()
+        print(json.dumps({
+            "installed": bool(_v),
+            "version": _v or None,
+            "note": "ubertooth-util -v firmware version." if _v
+                    else "Ubertooth not detected (ubertooth-util -v returned no version).",
+        }))
+        sys.exit(0)
     main()

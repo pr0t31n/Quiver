@@ -141,6 +141,14 @@ python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,bluefruit_le_
 firmware for the CC1352P-4 must still be built with `PLATFORM=CC1352P_4` (see the
 board's menu) because the PA path differs from stock images.
 
+**Passive firmware detection.** The Firmware tab reads the installed version
+directly off the device — read-only, no flashing — so you can see whether the
+correct firmware is already present before prepping an update. Supported devices
+expose it via `python3 <script> --probe-fw-version` (JSON) and a `fw_probe` flag
+in the tool registry: **CC1352P-4** and **CC26X2R1** (Sniffle `probe_fw_version`
+over the XDS110 serial), **HackRF One** (`hackrf_info`), and **Ubertooth One**
+(`ubertooth-util -v`). Other devices fall back to "Run script to detect".
+
 ### Microcontrollers & Embedded
 
 | Device | Shell | Chip | Notes |
