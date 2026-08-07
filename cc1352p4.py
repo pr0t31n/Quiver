@@ -59,7 +59,7 @@ from common import (
     find_serial_port_by_vidpid, ensure_pip_packages, ensure_system_tool,
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
-    web_detect_loop, run_streaming, ensure_openocd, verify_xds110_identity,
+    web_detect_loop, run_streaming, verify_xds110_identity, flash_ti_uniflash,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
 )
@@ -561,54 +561,16 @@ def op_flash_firmware():
         info("Flash cancelled.")
         return
 
-    # ── Step 2: flash — OpenOCD first (open-source, no TI login), then TI CLI ──
-    openocd = ensure_openocd()
-    if openocd:
-        cfg = "board/ti_cc13x2_launchpad.cfg"
-        info(f"Running: openocd -f {cfg} -c 'program {hex_file} verify reset exit'")
-        info("  Do NOT unplug the LaunchPad during flashing.")
-        rc = run_streaming(
-            [openocd, "-f", cfg, "-c", f"program {hex_file} verify reset exit"],
-            on_line=lambda l: info(f"  openocd: {l}"),
-            timeout=240,
-        )
-        if rc == 0:
-            ok("Sniffle firmware flashed via OpenOCD — proceed to 'BLE Capture'.")
-            info("  NOTE (-4 board): this is the stock CC1352P1F3 build. Run a short")
-            info("  'BLE Capture' to confirm 2.4 GHz reception. If captures come back")
-            info("  empty despite nearby BLE traffic, the -4's high-PA RF routing may")
-            info("  need a Sniffle SysConfig tweak (advanced) — reflashing is always")
-            info("  recoverable over SWD, so testing the prebuilt first is safe.")
-            return
-        err("OpenOCD flash failed — trying a TI flash tool if one is present.")
-    else:
-        warn("OpenOCD unavailable and could not be installed — trying TI tools…")
-
-    flash_tool = _check_uniflash()
-    if not flash_tool:
-        warn("No flasher available (OpenOCD failed and no dslite/UniFlash on PATH).")
-        info(f"  The hex is ready at: {hex_file}")
-        info("  Install a flasher, then re-run:")
-        info("    • OpenOCD (open-source, no login):  brew install open-ocd  /  apt install openocd")
-        info("    • or TI UniFlash (bundles dslite):  https://www.ti.com/tool/UNIFLASH")
-        return
-    info(f"Running: {flash_tool} -f {hex_file}")
-    try:
-        rc = run_streaming(
-            [flash_tool, "-f", str(hex_file)],
-            on_line=lambda l: info(f"  {flash_tool}: {l}"),
-            timeout=300,
-        )
-        if rc == 0:
-            ok("Sniffle firmware flashed via XDS110 — proceed to 'BLE Capture'.")
-        else:
-            err("Flash command returned an error.")
-            info("  - dslite may need an explicit --config .ccxml (export one from UniFlash GUI).")
-            info(f"  - Confirm the XDS110 is seen and not held by CCS/another dslite.")
-    except FileNotFoundError:
-        err(f"'{flash_tool}' not found at run time.")
-    except Exception as e:
-        err(f"Flash error: {e}")
+    # ── Step 2: flash via TI UniFlash/dslite ──────────────────────────────────
+    # OpenOCD CANNOT flash CC13xx/CC26xx over the XDS110 (2-pin cJTAG limitation),
+    # so UniFlash's dslite is the flasher. Auto-runs when a .ccxml is available;
+    # otherwise guides the UniFlash GUI, which auto-detects and always works.
+    result = flash_ti_uniflash(hex_file, device="CC1352P1F3", board_name="CC1352P-4")
+    if result:
+        info("NOTE (-4 board): this is the stock CC1352P1F3 build. Run a short")
+        info("  'BLE Capture' to confirm 2.4 GHz reception. If captures are empty")
+        info("  despite nearby BLE traffic, the -4's high-PA RF routing may need a")
+        info("  Sniffle SysConfig tweak (advanced); reflashing is always recoverable.")
 
 
 def op_ble_capture(port: str):

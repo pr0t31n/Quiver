@@ -1372,6 +1372,70 @@ def ensure_openocd() -> str:
     return shutil.which("openocd") or ""
 
 
+def find_dslite() -> str:
+    """Locate TI UniFlash's `dslite` CLI (PATH already includes common install
+    dirs via _augment_path). Returns the path, or '' if not found."""
+    import shutil
+    for name in ("dslite", "dslite.sh", "DSLite"):
+        p = shutil.which(name)
+        if p:
+            return p
+    for pat in ("/opt/ti/uniflash*/dslite*", "/Applications/ti/uniflash*/dslite*",
+                str(Path.home() / "ti" / "uniflash*" / "dslite*")):
+        for m in sorted(__import__("glob").glob(pat)):
+            if os.path.isfile(m) and os.access(m, os.X_OK):
+                return m
+    return ""
+
+
+def flash_ti_uniflash(hex_path, device: str, board_name: str,
+                      ccxml_env: str = "QUIVER_DSLITE_CCXML") -> bool:
+    """Flash a hex to a TI XDS110 LaunchPad using UniFlash's dslite CLI when a
+    .ccxml target config is available; otherwise guide the (reliable) UniFlash
+    GUI. dslite is the only tool that drives the XDS110 cJTAG correctly for
+    CC13xx/CC26xx — OpenOCD cannot. Returns True on a confirmed CLI flash, else
+    None/False (the GUI path is manual and can't be auto-confirmed).
+
+    device: TI device name, e.g. 'CC1352P1F3' or 'CC2652R1F'.
+    """
+    hex_path = str(hex_path)
+    dslite = find_dslite()
+    ccxml = os.environ.get(ccxml_env, "")
+
+    if dslite and ccxml and os.path.isfile(ccxml):
+        info(f"Flashing via dslite: {dslite}")
+        info(f"  Config: {ccxml}")
+        info("  Do NOT unplug the LaunchPad during flashing.")
+        rc = run_streaming(
+            [dslite, f"--config={ccxml}", "--verbose", hex_path],
+            on_line=lambda l: info(f"  dslite: {l}"),
+            timeout=300,
+        )
+        if rc == 0:
+            ok(f"Flashed {board_name} via UniFlash/dslite.")
+            return True
+        err("dslite returned an error — check the .ccxml matches this device/probe.")
+        return False
+
+    # No CLI path available — guide the guaranteed GUI flow.
+    if not dslite:
+        warn("TI UniFlash (dslite) not found.")
+        info("  Install it once (free; requires a TI account):")
+        info("    https://www.ti.com/tool/UNIFLASH")
+        info("  After install, dslite is auto-discovered (PATH includes the TI dirs).")
+    else:
+        info(f"dslite found: {dslite}")
+        info(f"  For CLI flashing, export a target .ccxml and set {ccxml_env}:")
+        info(f"    export {ccxml_env}=/path/to/{device}.ccxml   (export from the UniFlash GUI)")
+    info("")
+    info(f"Reliable path — TI UniFlash GUI (auto-detects the XDS110 + {device}):")
+    info("  1. Launch 'uniflash' (or the UniFlash desktop app).")
+    info(f"  2. Select the detected {board_name} / {device} on the XDS110.")
+    info(f"  3. Load image:  {hex_path}")
+    info("  4. Click 'Load Image' to flash.")
+    return None
+
+
 # ── XDS110 board identity ─────────────────────────────────────────────────────
 # The CC1352P-4 and CC26X2R1 LaunchPads both present their onboard XDS110 debug
 # probe as USB 0451:BEF3, so they are INDISTINGUISHABLE by USB descriptor — a

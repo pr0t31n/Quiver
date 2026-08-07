@@ -48,7 +48,7 @@ from common import (
     require_sudo, sudo_run,
     ensure_apt_packages,
     web_detect_loop, run_streaming,
-    get_firmware_dir, ensure_openocd, verify_xds110_identity,
+    get_firmware_dir, verify_xds110_identity, flash_ti_uniflash,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -404,60 +404,11 @@ def op_flash_firmware(port: str):
         err(f"File not found: {fw}")
         return
 
-    # ── Flash over the onboard XDS110 ─────────────────────────────────────────
-    # Primary: OpenOCD — open-source, no TI login, auto-installed if missing.
-    openocd = ensure_openocd()
-    if openocd:
-        cfg = "board/ti_cc26x2_launchpad.cfg"
-        if confirm(f"Flash {fw.name} via OpenOCD over XDS110?", default=True):
-            info(f"Running: openocd -f {cfg} -c 'program {fw} verify reset exit'")
-            info("  Do NOT unplug the LaunchPad during flashing.")
-            rc = run_streaming(
-                [openocd, "-f", cfg, "-c", f"program {fw} verify reset exit"],
-                on_line=lambda l: info(f"  openocd: {l}"),
-                timeout=240,
-            )
-            if rc == 0:
-                ok("Sniffle firmware flashed via OpenOCD — the board now runs Sniffle.")
-                info("  Proceed to 'BLE Capture' (Sniffle speaks 2 Mbaud on the App UART).")
-                return
-            err("OpenOCD flash failed — trying TI flash tools if present.")
-    else:
-        warn("OpenOCD unavailable and could not be installed — trying TI tools…")
-
-    # ── Fallback: TI UniFlash / dslite (used only if you installed them) ───────
-    tool = _check_flash_tool()
-    if tool == "dslite":
-        if confirm(f"Flash {fw.name} to the CC26X2R1 via XDS110 (dslite)?", default=True):
-            info(f"Running: dslite -f -v {fw}")
-            info("  Do NOT unplug the LaunchPad during flashing.")
-            rc = run_streaming(
-                ["dslite", "-f", "-v", str(fw)],
-                on_line=lambda l: info(f"  dslite: {l}"),
-                timeout=300,
-            )
-            if rc == 0:
-                ok("Sniffle firmware flashed — the board now runs Sniffle.")
-                info("  Proceed to 'BLE Capture' (Sniffle speaks 2 Mbaud on the App UART).")
-            else:
-                err("dslite returned an error.")
-                info("  dslite may need an explicit --config <target.ccxml>; the UniFlash")
-                info("  GUI can export one for the CC2652R1, or load the hex in the GUI.")
-        return
-    if tool == "uniflash":
-        info("UniFlash detected — flash via the GUI:")
-        info(f"  Launch 'uniflash', pick CC2652R1, and load: {fw}")
-        info("  (dslite CLI was not found on PATH; the GUI is the reliable path.)")
-        pause("Press ENTER once flashed.")
-        return
-
-    warn("No TI flash tool (uniflash / dslite) on PATH.")
-    info("  Install TI UniFlash (bundles dslite): https://www.ti.com/tool/UNIFLASH")
-    info(f"  Then re-run this option — the hex is ready at: {fw}")
-    info("  Alternative (Method B) — ROM serial bootloader via cc2538-bsl:")
-    info(f"    git clone https://github.com/JelmerT/cc2538-bsl && "
-         f"python3 cc2538-bsl/cc2538-bsl.py -p {port} -e -w -v {fw}")
-    pause("Press ENTER to continue.")
+    # ── Flash via TI UniFlash/dslite ──────────────────────────────────────────
+    # OpenOCD CANNOT flash CC13xx/CC26xx over the XDS110 (2-pin cJTAG limitation),
+    # so UniFlash's dslite is the flasher. Auto-runs when a .ccxml is available;
+    # otherwise guides the UniFlash GUI, which auto-detects and always works.
+    flash_ti_uniflash(fw, device="CC2652R1F", board_name="CC26X2R1")
 
 
 def op_ble_capture(port: str):

@@ -203,17 +203,18 @@ def ensure_homebrew():
 
 
 def print_ti_toolchain_notice():
-    """Flashing is handled by OpenOCD (auto-installed). Only the CC1352P-4 *build*
-    still needs the TI SDK, which is login-gated — print guidance for that."""
-    banner("TI CC1352P-4 build dependency — manual, one-time")
-    info("Flashing is handled by OpenOCD (installed above) — no TI login needed.")
-    info("The one thing that CANNOT be auto-installed (requires a TI account/login):")
-    info("  • TI SimpleLink CC13xx/CC26xx SDK — ONLY needed to BUILD the CC1352P-4 hex")
-    info("    https://www.ti.com/tool/SIMPLELINK-LOWPOWER-F2-SDK")
-    info("    After install:  export SIMPLELINK_SDK=/path/to/simplelink_cc13xx_cc26xx_sdk_x")
-    info("Note: the CC26X2R1 needs NONE of this — Quiver downloads its prebuilt hex and")
-    info("      OpenOCD flashes it. It is the turnkey board (no build, no TI login).")
-    info("Optional: TI UniFlash (dslite) still works as a fallback flasher if present.")
+    """The TI LaunchPads (CC1352P-4 / CC26X2R1) need TI UniFlash to flash — OpenOCD
+    cannot drive their XDS110 cJTAG. UniFlash is login-gated, so guide the user."""
+    banner("TI UniFlash — required to flash the CC1352P-4 / CC26X2R1 (manual, one-time)")
+    info("These LaunchPads flash over the onboard XDS110 using 2-pin cJTAG, which")
+    info("only TI UniFlash's 'dslite' handles correctly (OpenOCD cannot).")
+    info("  • TI UniFlash (free; requires a TI account):")
+    info("    https://www.ti.com/tool/UNIFLASH")
+    info("    Install once; Quiver auto-discovers dslite (PATH includes the TI dirs),")
+    info("    or use the UniFlash GUI (auto-detects the board, load the hex, flash).")
+    info("Firmware itself needs NO TI login — Quiver downloads the prebuilt Sniffle")
+    info("hex for both boards. The TI SimpleLink SDK is only needed if you want to")
+    info("BUILD Sniffle from source (advanced): https://www.ti.com/tool/SIMPLELINK-LOWPOWER-F2-SDK")
 
 def install_system():
     banner("Phase: system packages")

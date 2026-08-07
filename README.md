@@ -137,9 +137,14 @@ Bluetooth LE, the Adafruit sniffer host scripts, and crackle) is fetched into
 python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,bluefruit_le_sniffer --yes
 ```
 
-`--yes` runs non-interactively; omit `--tools` to select interactively. Sniffle
-firmware for the CC1352P-4 must still be built with `PLATFORM=CC1352P_4` (see the
-board's menu) because the PA path differs from stock images.
+`--yes` runs non-interactively; omit `--tools` to select interactively. Both TI
+boards use a **prebuilt Sniffle hex** (CC26X2R1 → `sniffle_cc2652r1.hex`,
+CC1352P-4 → `sniffle_cc1352p1_cc2652p1.hex`) — no from-source build or TI SDK is
+needed. **Flashing** these boards requires **TI UniFlash** (`dslite`): the XDS110
+uses 2-pin cJTAG, which OpenOCD cannot drive, so UniFlash is the flasher (free,
+needs a TI account; Quiver auto-discovers `dslite` or guides the GUI). On the
+CC1352P-4, run a BLE capture after flashing to confirm 2.4 GHz reception (the -4
+routes 2.4 GHz through its high-power PA path).
 
 **Passive firmware detection.** The Firmware tab reads the installed version
 directly off the device — read-only, no flashing — so you can see whether the
@@ -252,7 +257,7 @@ Each device has a payload library — named scripts stored under `payloads/<devi
 **Zigbee / BLE / LoRa:**
 - `zigbee-channel-survey`, `zigbee-pcap-capture`, `zigbee-replay-attack`, `zigbee-key-extract`, `killerbee-launch`
 - `lora-survey`, `lora-lorawan-sniff`, `lora-replay-test`
-- BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). CC1352P-4 must be built with `PLATFORM=CC1352P_4` (2.4 GHz on the PA path).
+- BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). TI boards flash prebuilt Sniffle hexes via **TI UniFlash** (`dslite`; OpenOCD can't drive the XDS110 cJTAG).
 
 **Debug Probes:**
 - Bus Pirate 5: `buspirate-uart-sniff`, `buspirate-i2c-scan`, `buspirate-spi-flash-dump`, `buspirate-jtag-idcode`
