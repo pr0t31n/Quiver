@@ -1345,7 +1345,31 @@ def ensure_brew_packages(packages: list) -> bool:
     return False
 
 
-def ensure_pip_packages(packages: list) -> bool:
+def ensure_openocd() -> str:
+    """Return the path to an `openocd` binary, auto-installing it if missing.
+
+    OpenOCD is the open-source flasher for TI XDS110 LaunchPads (CC13xx/CC26xx)
+    and, unlike TI UniFlash, needs no TI login — so it can be installed as part
+    of a flash workflow. Returns the path, or '' if it could not be provided.
+    """
+    import shutil
+    path = shutil.which("openocd")
+    if path:
+        return path
+    flavor = get_os_flavor()
+    info("openocd not found — attempting to install it (open-source XDS110 flasher)…")
+    if flavor == "macos":
+        ensure_brew_packages(["open-ocd"])       # brew formula is 'open-ocd'
+    elif flavor in ("debian", "kali", "ubuntu", "raspbian"):
+        ensure_apt_packages(["openocd"])
+    else:
+        # dnf/zypper/others: best-effort, non-fatal
+        for mgr in (["dnf", "install", "-y", "openocd"],
+                    ["zypper", "--non-interactive", "install", "openocd"]):
+            if shutil.which(mgr[0]):
+                run(" ".join(mgr))
+                break
+    return shutil.which("openocd") or ""
     """
     Ensure Python packages are installed via pip.
     packages: list of (import_name, pip_install_spec) tuples.

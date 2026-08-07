@@ -165,18 +165,21 @@ APT_PACKAGES = [
     "libusb-1.0-0-dev", "libusb-dev",
     "git", "python3-pip", "python3-dev",
     "gcc-arm-none-eabi",   # build Sniffle firmware for CC1352P-4 (PLATFORM=CC1352P_4)
+    "openocd",             # open-source XDS110 flasher for the TI LaunchPads
 ]
 DNF_PACKAGES = [
     "hackrf", "ubertooth", "stlink", "libusb-devel",
     "git", "python3-pip", "python3-devel",
     "arm-none-eabi-gcc-cs", "arm-none-eabi-newlib",  # CC1352P-4 Sniffle build
+    "openocd",
 ]
 ZYPPER_PACKAGES = [
     "hackrf", "ubertooth", "libusb-1_0-devel",
     "git", "python3-pip", "python3-devel",
     "cross-arm-none-eabi-gcc13", "cross-arm-none-eabi-newlib-devel",  # CC1352P-4 build
+    "openocd",
 ]
-BREW_PACKAGES  = ["hackrf", "ubertooth", "stlink", "proxmark3", "libusb"]
+BREW_PACKAGES  = ["hackrf", "ubertooth", "stlink", "proxmark3", "libusb", "open-ocd"]
 BREW_CASKS     = ["segger-jlink", "gcc-arm-embedded"]  # gcc-arm-embedded = arm-none-eabi-gcc
 
 
@@ -200,16 +203,17 @@ def ensure_homebrew():
 
 
 def print_ti_toolchain_notice():
-    """The TI SDK/UniFlash cannot be auto-installed (TI login) — print guidance."""
-    banner("TI toolchain (CC1352P-4 build + flashing) — manual, one-time")
-    info("These require a TI account/login, so they are NOT auto-installed:")
-    info("  • TI SimpleLink CC13xx/CC26xx SDK — ONLY needed to BUILD the P-4 hex")
+    """Flashing is handled by OpenOCD (auto-installed). Only the CC1352P-4 *build*
+    still needs the TI SDK, which is login-gated — print guidance for that."""
+    banner("TI CC1352P-4 build dependency — manual, one-time")
+    info("Flashing is handled by OpenOCD (installed above) — no TI login needed.")
+    info("The one thing that CANNOT be auto-installed (requires a TI account/login):")
+    info("  • TI SimpleLink CC13xx/CC26xx SDK — ONLY needed to BUILD the CC1352P-4 hex")
     info("    https://www.ti.com/tool/SIMPLELINK-LOWPOWER-F2-SDK")
     info("    After install:  export SIMPLELINK_SDK=/path/to/simplelink_cc13xx_cc26xx_sdk_x")
-    info("  • TI UniFlash (bundles the 'dslite' CLI) — needed to FLASH either board")
-    info("    https://www.ti.com/tool/UNIFLASH  (add its dir with dslite.sh to PATH)")
-    info("Note: the CC26X2R1 needs NEITHER for a working sniffer — Quiver downloads")
-    info("      its prebuilt hex; only UniFlash/dslite is used to flash it.")
+    info("Note: the CC26X2R1 needs NONE of this — Quiver downloads its prebuilt hex and")
+    info("      OpenOCD flashes it. It is the turnkey board (no build, no TI login).")
+    info("Optional: TI UniFlash (dslite) still works as a fallback flasher if present.")
 
 def install_system():
     banner("Phase: system packages")

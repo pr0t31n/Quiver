@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 import concurrent.futures
 import ipaddress

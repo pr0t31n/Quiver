@@ -62,7 +62,7 @@ from common import (
     find_serial_port_by_vidpid, ensure_pip_packages, ensure_system_tool,
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
-    web_detect_loop, run_streaming,
+    web_detect_loop, run_streaming, ensure_openocd,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
 )
@@ -136,23 +136,22 @@ def _list_xds110_ports() -> list:
     return ports
 
 
-def probe_fw_version_json() -> None:
-    """Passive: read the running Sniffle firmware version over serial and print
-    JSON. Read-only — no flashing, no config changes. Used by the Firmware tab
-    so the operator can see what's on the board BEFORE prepping to flash."""
-    import json
+def _probe_fw_version() -> dict:
+    """Passive, read-only: query the running Sniffle firmware version over the
+    XDS110 serial. No flashing, no config changes. Returns a dict:
+      {"installed": bool, "version": str|None, "raw": str, "note": str}."""
     out = {"installed": False, "version": None, "raw": "", "note": ""}
     cli = get_firmware_dir("cc1352p4") / "Sniffle" / "python_cli"
     if not cli.exists():
         out["note"] = "Sniffle host tooling not present — run the firmware download first."
-        print(json.dumps(out)); return
+        return out
     if str(cli) not in sys.path:
         sys.path.insert(0, str(cli))
     try:
         from sniffle.sniffle_hw import SniffleHW
     except Exception as e:
         out["note"] = f"Sniffle Python package unavailable ({e})."
-        print(json.dumps(out)); return
+        return out
     hw = None
     try:
         hw = SniffleHW(None, timeout=0.1)          # auto-detects the XDS110 port
@@ -172,7 +171,13 @@ def probe_fw_version_json() -> None:
                 hw.ser.close()
         except Exception:
             pass
-    print(json.dumps(out))
+    return out
+
+
+def probe_fw_version_json() -> None:
+    """Print the passive probe result as one JSON line (used by the Firmware tab)."""
+    import json
+    print(json.dumps(_probe_fw_version()))
 
 
 def _sniffle_dir() -> Path:
@@ -452,26 +457,46 @@ def op_build_firmware():
 
 def op_flash_firmware():
     heading("Flash Sniffle Firmware (over XDS110)")
-    info("Flashing the CC1352P_4-built Sniffle hex to the LaunchPad via XDS110.")
-    info("")
-    info("IMPORTANT — flash the hex built with PLATFORM=CC1352P_4:")
-    info("  Flashing a prebuilt / CC1352P1 image leaves 2.4 GHz BLE non-functional")
-    info("  on this board (wrong RF front-end / PA path).")
-    info("")
-    info("FLASH METHOD: TI UniFlash 'dslite' CLI over the onboard XDS110 debugger.")
-    info("  The XDS110 speaks JTAG/SWD to the CC1352P — no external programmer needed.")
-    info("")
 
-    flash_tool = _check_uniflash()
+    # ── Step 0: passive check — is the board already running Sniffle? ──────────
+    info("Checking what firmware is currently on the board (read-only)…")
+    cur = _probe_fw_version()
+    if cur.get("installed"):
+        ok(f"Board is ALREADY running Sniffle {cur['version']} ({cur.get('raw','')}).")
+        info("  No need to flash unless you are changing versions.")
+        if not confirm("Re-flash anyway?", default=False):
+            info("Skipping flash — the board already has Sniffle firmware.")
+            return
+    elif cur.get("note"):
+        info(f"  {cur['note']}")
 
+    # ── Step 1: locate the built hex, and explain clearly if it is missing ────
+    info("")
+    info("IMPORTANT — the CC1352P-4 must run a hex built with PLATFORM=CC1352P_4")
+    info("  (a prebuilt / CC1352P1 image breaks 2.4 GHz BLE on this board).")
     sniffle = _sniffle_dir()
-    default_hex = ""
     fw_dir = sniffle / "fw"
-    if fw_dir.exists():
-        hexes = sorted(fw_dir.rglob("*.hex"))
-        if hexes:
-            default_hex = str(hexes[0])
-            info(f"Detected built hex: {default_hex}")
+    hexes = sorted(fw_dir.rglob("*.hex")) if fw_dir.exists() else []
+    default_hex = str(hexes[0]) if hexes else ""
+
+    if not default_hex:
+        # This is the case the operator kept hitting: no hex to point at because
+        # the build has not produced one. Say WHY instead of a bare path prompt.
+        warn("No built Sniffle hex found under:")
+        info(f"    {fw_dir}")
+        info("This means the firmware build has not completed yet. Most likely one of:")
+        info("  • The TI SimpleLink CC13xx/CC26xx SDK is not installed / SIMPLELINK_SDK")
+        info("    is unset — the P-4 hex CANNOT be built without it (TI login required).")
+        info("  • arm-none-eabi-gcc was not on PATH when the build ran.")
+        info("Do this first, in order:")
+        info("  1. Menu → 'Build Sniffle firmware (CC1352P_4)' — it checks the toolchain")
+        info("     and reports exactly what is missing.")
+        info("  2. Install any missing piece it names (the SDK is the manual, TI-login")
+        info("     step; arm-gcc installs automatically).")
+        info("  Tip: the CC26X2R1 needs NO build — it flashes a prebuilt hex.")
+        if not confirm("Enter a hex path manually instead?", default=False):
+            return
+        default_hex = ""
 
     hex_path = prompt("Path to the CC1352P_4 Sniffle .hex file", default=default_hex)
     if not hex_path:
@@ -480,31 +505,40 @@ def op_flash_firmware():
     hex_file = Path(hex_path)
     if not hex_file.exists():
         err(f"File not found: {hex_file}")
-        info("  Build the firmware first with 'Build Sniffle firmware (CC1352P_4)'.")
-        return
-    if hex_file.suffix.lower() not in (".hex", ".bin", ".out"):
-        warn(f"Unexpected firmware extension: {hex_file.suffix}")
-        info("  TI flashing usually uses .hex (or the .out ELF).")
-        if not confirm("Continue anyway?", default=False):
-            return
-
-    if not flash_tool:
-        warn("No TI flash CLI available — cannot flash automatically.")
-        info("  Options:")
-        info("    1. Install TI UniFlash: https://www.ti.com/tool/UNIFLASH")
-        info("       Then add its dir (with dslite.sh) to PATH and re-run this option.")
-        info("    2. Use the UniFlash GUI: create a CC1352P7/CC1352P config, select")
-        info(f"       the XDS110 connection, load {hex_file}, and flash.")
-        info("    3. Use TI Code Composer Studio to flash over the XDS110.")
+        info("  Build it first via 'Build Sniffle firmware (CC1352P_4)'.")
         return
 
-    if not confirm(f"Flash {hex_file.name} to the CC1352P-4 via XDS110 ({flash_tool})?",
-                   default=True):
+    if not confirm(f"Flash {hex_file.name} to the CC1352P-4 via XDS110?", default=True):
         info("Flash cancelled.")
         return
 
-    info(f"Running: {flash_tool} --config <XDS110/CC1352P> {hex_file}")
-    info("  Do NOT unplug the LaunchPad during flashing.")
+    # ── Step 2: flash — OpenOCD first (open-source, no TI login), then TI CLI ──
+    openocd = ensure_openocd()
+    if openocd:
+        cfg = "board/ti_cc13x2_launchpad.cfg"
+        info(f"Running: openocd -f {cfg} -c 'program {hex_file} verify reset exit'")
+        info("  Do NOT unplug the LaunchPad during flashing.")
+        rc = run_streaming(
+            [openocd, "-f", cfg, "-c", f"program {hex_file} verify reset exit"],
+            on_line=lambda l: info(f"  openocd: {l}"),
+            timeout=240,
+        )
+        if rc == 0:
+            ok("Sniffle firmware flashed via OpenOCD — proceed to 'BLE Capture'.")
+            return
+        err("OpenOCD flash failed — trying a TI flash tool if one is present.")
+    else:
+        warn("OpenOCD unavailable and could not be installed — trying TI tools…")
+
+    flash_tool = _check_uniflash()
+    if not flash_tool:
+        warn("No flasher available (OpenOCD failed and no dslite/UniFlash on PATH).")
+        info(f"  The hex is ready at: {hex_file}")
+        info("  Install a flasher, then re-run:")
+        info("    • OpenOCD (open-source, no login):  brew install open-ocd  /  apt install openocd")
+        info("    • or TI UniFlash (bundles dslite):  https://www.ti.com/tool/UNIFLASH")
+        return
+    info(f"Running: {flash_tool} -f {hex_file}")
     try:
         rc = run_streaming(
             [flash_tool, "-f", str(hex_file)],
@@ -512,18 +546,13 @@ def op_flash_firmware():
             timeout=300,
         )
         if rc == 0:
-            ok("Sniffle firmware flashed via XDS110.")
-            info("  The board will run Sniffle — proceed to 'BLE Capture'.")
+            ok("Sniffle firmware flashed via XDS110 — proceed to 'BLE Capture'.")
         else:
             err("Flash command returned an error.")
-            info("Troubleshooting:")
-            info("  - dslite may need an explicit --config / target .ccxml. The TI")
-            info("    UniFlash GUI can export the correct config for CC1352P.")
-            info("  - Confirm the XDS110 is seen: lsusb | grep -i 0451")
-            info("  - Ensure no other process (CCS, another dslite) holds the XDS110.")
-            info(f"  - Manual: use the UniFlash GUI to load {hex_file}.")
+            info("  - dslite may need an explicit --config .ccxml (export one from UniFlash GUI).")
+            info(f"  - Confirm the XDS110 is seen and not held by CCS/another dslite.")
     except FileNotFoundError:
-        err(f"'{flash_tool}' not found at run time. Install TI UniFlash.")
+        err(f"'{flash_tool}' not found at run time.")
     except Exception as e:
         err(f"Flash error: {e}")
 
