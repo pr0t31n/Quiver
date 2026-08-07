@@ -200,6 +200,9 @@ def _check_arm_toolchain():
         info("    (or: brew install arm-none-eabi-gcc)")
         if confirm("Attempt to install the ARM toolchain via brew?", default=True):
             ensure_brew_packages(["arm-none-eabi-gcc"])
+        if not (run_output("which arm-none-eabi-gcc 2>/dev/null || true") or "").strip():
+            info("  If Homebrew itself is missing, run the Quiver installer once —")
+            info("  it bootstraps Homebrew and the ARM toolchain:  python3 install.py")
     else:
         info("  Linux install: sudo apt-get install gcc-arm-none-eabi")
         if confirm("Attempt to install gcc-arm-none-eabi via apt?", default=True):

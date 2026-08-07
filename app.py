@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 import concurrent.futures
 import ipaddress
@@ -2072,9 +2072,10 @@ def on_script_answer(data):
         q.put(answer)
         _pending_prompts.pop(sess_id, None)
         socketio.emit("prompt_resolved", {}, room=_room(sess_id))
-        echo = {"text": f"< {answer}", "stream": "system", "ts": _ts()}
-        _buf_append(_console_buffer, sess_id, echo)
-        socketio.emit("script_output", echo, room=_room(sess_id))
+        # Note: the answer echo (masked for passwords) is emitted by
+        # _stdout_reader when it forwards the answer to the script's stdin.
+        # Do NOT echo here too — it would duplicate the line and would leak
+        # password values in cleartext to every viewer.
 
 
 @socketio.on("kill_script")

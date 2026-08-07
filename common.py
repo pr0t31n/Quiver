@@ -22,6 +22,28 @@ except ImportError:
     HAS_PARAMIKO = False
 
 
+# ── PATH augmentation ─────────────────────────────────────────────────────────
+# Quiver often runs as a root launchd/systemd service, whose PATH is minimal
+# (/usr/bin:/bin:/usr/sbin:/sbin) and excludes Homebrew / local install dirs.
+# Tools installed there (arm-none-eabi-gcc, dslite, brew, openocd, …) are then
+# invisible to `which` and to child processes like `make`. Append the standard
+# local tool dirs so they are discoverable for this process and everything it
+# spawns. Append (not prepend) so system tools keep priority.
+def _augment_path() -> None:
+    extra = [
+        "/opt/homebrew/bin", "/opt/homebrew/sbin",   # Apple-Silicon Homebrew
+        "/usr/local/bin", "/usr/local/sbin",          # Intel Homebrew / local
+        "/opt/ti/uniflash/dslite",                    # common TI UniFlash dir
+    ]
+    cur = os.environ.get("PATH", "").split(os.pathsep)
+    added = [d for d in extra if os.path.isdir(d) and d not in cur]
+    if added:
+        os.environ["PATH"] = os.pathsep.join(cur + added)
+
+
+_augment_path()
+
+
 # ── Web mode flag ─────────────────────────────────────────────────────────────
 # When QUIVER_WEB_MODE=1 the script is driven by the Flask app over stdin/stdout.
 # Log functions emit  LOG:{json}   lines.

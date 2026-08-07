@@ -164,17 +164,52 @@ APT_PACKAGES = [
     "hackrf", "ubertooth", "stlink-tools", "proxmark3",
     "libusb-1.0-0-dev", "libusb-dev",
     "git", "python3-pip", "python3-dev",
+    "gcc-arm-none-eabi",   # build Sniffle firmware for CC1352P-4 (PLATFORM=CC1352P_4)
 ]
 DNF_PACKAGES = [
     "hackrf", "ubertooth", "stlink", "libusb-devel",
     "git", "python3-pip", "python3-devel",
+    "arm-none-eabi-gcc-cs", "arm-none-eabi-newlib",  # CC1352P-4 Sniffle build
 ]
 ZYPPER_PACKAGES = [
     "hackrf", "ubertooth", "libusb-1_0-devel",
     "git", "python3-pip", "python3-devel",
+    "cross-arm-none-eabi-gcc13", "cross-arm-none-eabi-newlib-devel",  # CC1352P-4 build
 ]
 BREW_PACKAGES  = ["hackrf", "ubertooth", "stlink", "proxmark3", "libusb"]
-BREW_CASKS     = ["segger-jlink"]
+BREW_CASKS     = ["segger-jlink", "gcc-arm-embedded"]  # gcc-arm-embedded = arm-none-eabi-gcc
+
+
+def ensure_homebrew():
+    """Install Homebrew on macOS if it is missing (needed for brew_install)."""
+    if shutil.which("brew"):
+        return
+    for p in ("/opt/homebrew/bin/brew", "/usr/local/bin/brew"):
+        if os.path.exists(p):
+            return
+    warn("Homebrew not found — installing it (needed for the board toolchains)…")
+    installer = (
+        '/bin/bash -c "$(curl -fsSL '
+        'https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+    )
+    env = dict(os.environ, NONINTERACTIVE="1")
+    try:
+        subprocess.run(installer, shell=True, env=env, check=False)
+    except Exception as e:
+        warn(f"Homebrew install failed ({e}). Install it manually: https://brew.sh")
+
+
+def print_ti_toolchain_notice():
+    """The TI SDK/UniFlash cannot be auto-installed (TI login) — print guidance."""
+    banner("TI toolchain (CC1352P-4 build + flashing) — manual, one-time")
+    info("These require a TI account/login, so they are NOT auto-installed:")
+    info("  • TI SimpleLink CC13xx/CC26xx SDK — ONLY needed to BUILD the P-4 hex")
+    info("    https://www.ti.com/tool/SIMPLELINK-LOWPOWER-F2-SDK")
+    info("    After install:  export SIMPLELINK_SDK=/path/to/simplelink_cc13xx_cc26xx_sdk_x")
+    info("  • TI UniFlash (bundles the 'dslite' CLI) — needed to FLASH either board")
+    info("    https://www.ti.com/tool/UNIFLASH  (add its dir with dslite.sh to PATH)")
+    info("Note: the CC26X2R1 needs NEITHER for a working sniffer — Quiver downloads")
+    info("      its prebuilt hex; only UniFlash/dslite is used to flash it.")
 
 def install_system():
     banner("Phase: system packages")
@@ -185,6 +220,7 @@ def install_system():
     elif OS == "zypper":
         zypper_install(ZYPPER_PACKAGES)
     elif OS == "macos":
+        ensure_homebrew()
         for pkg in BREW_PACKAGES:
             brew_install(pkg)
         for cask in BREW_CASKS:
@@ -193,6 +229,7 @@ def install_system():
         warn("Windows detected — system package installation not supported. Install tools manually.")
     else:
         warn(f"Unknown OS '{OS}' — skipping system packages.")
+    print_ti_toolchain_notice()
 
 # ---------------------------------------------------------------------------
 # Go (not needed for Quiver but kept as phase for consistency)

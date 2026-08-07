@@ -397,6 +397,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Menu/confirm option feedback: clicked or previously-completed steps go green
+   with a checkmark; siblings dim while the choice is being sent. */
+.modal-option-btn.completed,
+.modal-option-btn.completed:hover {
+  background: #22a35b !important;
+  border-color: #1c8a4c !important;
+  color: #fff !important;
+}
+.modal-option-btn.completed::before { content: "\2713  "; font-weight: 700; }
+.modal-option-btn:disabled { opacity: .5; cursor: not-allowed; }
+.modal-option-btn.completed:disabled { opacity: 1; cursor: default; }
 </style>
 {% endblock %}
 
@@ -752,6 +763,15 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
   const cancelBtn  = document.getElementById('modalCancelBtn');
 
   let _currentModalType = 'text';  // track type for echo masking
+  const _menuCompleted = {};       // menu question -> Set(completed option labels)
+
+  // Mark the clicked option green + disable siblings so the user gets visible
+  // confirmation the click registered, then send after a short beat.
+  function finishOption(btn, answer) {
+    optionBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    btn.classList.add('completed');
+    setTimeout(() => sendAnswer(answer), 350);
+  }
 
   function openModal(payload) {
     const ptype    = payload.type || 'text';
@@ -768,11 +788,18 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
 
     if (ptype === 'menu' && options.length) {
       textInput.style.display = 'none';
+      const done = _menuCompleted[question] || new Set();
       options.forEach((opt, idx) => {
         const btn = document.createElement('button');
         btn.className   = 'btn btn-secondary btn-sm modal-option-btn';
         btn.textContent = `${idx + 1}. ${opt}`;
-        btn.addEventListener('click', () => sendAnswer(String(idx)));
+        // Steps chosen earlier this session stay marked done when the menu
+        // re-appears, but remain clickable so repeatable actions still work.
+        if (done.has(opt)) btn.classList.add('completed');
+        btn.addEventListener('click', () => {
+          (_menuCompleted[question] = _menuCompleted[question] || new Set()).add(opt);
+          finishOption(btn, String(idx));
+        });
         optionBtns.appendChild(btn);
       });
     } else if (ptype === 'confirm') {
@@ -781,7 +808,7 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
         const btn = document.createElement('button');
         btn.className   = 'btn btn-secondary btn-sm modal-option-btn';
         btn.textContent = label;
-        btn.addEventListener('click', () => sendAnswer(i === 0 ? 'y' : 'n'));
+        btn.addEventListener('click', () => finishOption(btn, i === 0 ? 'y' : 'n'));
         optionBtns.appendChild(btn);
       });
     } else if (ptype === 'pause') {
@@ -789,7 +816,7 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
       const btn = document.createElement('button');
       btn.className   = 'btn btn-primary btn-sm modal-option-btn';
       btn.textContent = 'Continue';
-      btn.addEventListener('click', () => sendAnswer(''));
+      btn.addEventListener('click', () => finishOption(btn, ''));
       optionBtns.appendChild(btn);
     } else if (ptype === 'password') {
       // Masked password input

@@ -284,8 +284,16 @@ FIRMWARE_SOURCES = {
         "name": "LAUNCHXL-CC26X2R1",
         "sources": [
             {
+                # The CC26X2R1 LaunchPad carries the CC2652R1 — Sniffle ships a
+                # ready-to-flash prebuilt for it, so no build toolchain is needed.
+                "label": "Sniffle prebuilt firmware (CC2652R1 — ready to flash)",
+                "github": ("nccgroup", "Sniffle"),
+                "asset_pattern": r"sniffle_cc2652r1\.hex$",
+                "dest_subdir": "prebuilt",
+            },
+            {
                 "type": "gitclone",
-                "label": "Sniffle (NCC Group) — Bluetooth 5 / BLE sniffer + host CLI + extcap",
+                "label": "Sniffle (NCC Group) — host CLI + extcap (+ source to build)",
                 "giturl": "https://github.com/nccgroup/Sniffle",
                 "dest_subdir": "Sniffle",
             },

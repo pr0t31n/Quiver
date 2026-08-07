@@ -141,6 +141,33 @@ def _find_sniff_receiver() -> Path:
     return _sniffle_dir() / "python_cli" / "sniff_receiver.py"
 
 
+def _prebuilt_hex() -> Path:
+    """Newest downloaded Sniffle prebuilt hex for the CC2652R1, or None.
+
+    Fetched into firmware/cc26x2r1/prebuilt/<tag>/ by firmware/download.py.
+    """
+    pdir = get_firmware_dir("cc26x2r1") / "prebuilt"
+    if not pdir.exists():
+        return None
+    hexes = sorted(pdir.rglob("sniffle_cc2652r1*.hex"))
+    return hexes[-1] if hexes else None
+
+
+def _download_prebuilt_hex() -> Path:
+    """Run the Quiver firmware downloader to fetch the CC2652R1 prebuilt hex."""
+    dl = Path(__file__).resolve().parent / "firmware" / "download.py"
+    if not dl.exists():
+        warn(f"Firmware downloader not found at {dl}.")
+        return None
+    info("Fetching the Sniffle CC2652R1 prebuilt hex via the firmware downloader…")
+    run_streaming(
+        [sys.executable, str(dl), "--tools", "cc26x2r1", "--yes"],
+        on_line=lambda l: info(f"  download: {l}"),
+        timeout=600,
+    )
+    return _prebuilt_hex()
+
+
 def _check_flash_tool() -> str:
     """Return 'uniflash', 'dslite', or '' depending on what's on PATH."""
     info("Checking for a TI flash tool (UniFlash / dslite) on PATH…")
@@ -285,49 +312,68 @@ def op_install_sniffle():
 def op_flash_firmware(port: str):
     heading("Flash Sniffle Firmware")
     info("Flashing the Sniffle sniffer firmware onto the CC26X2R1 LaunchPad.")
-    info("This replaces the stock firmware so the board acts as a BLE sniffer.")
-    info("")
-    info("STEP 1 — GET THE PREBUILT FIRMWARE:")
-    info("  Sniffle ships prebuilt .hex firmware on its GitHub Releases page.")
-    info(f"    {SNIFFLE_REPO}/releases")
-    info("  For the LAUNCHXL-CC26X2R1, use the CC2652R1F platform build:")
-    info("    sniffle_cc2652r1f_<version>.hex   (platform: CC2652R1F)")
-    info("  Download it to a known path before flashing.")
-    info("")
-    info("STEP 2 — FLASH IT (two supported methods):")
-    info("")
-    info("  METHOD A (recommended) — onboard XDS110 via TI UniFlash / dslite:")
-    info("    The LaunchPad's XDS110 debug probe programs the chip over SWD.")
-    info("    UniFlash GUI: load the .hex, select CC2652R1F, click Load Image.")
-    info("    dslite CLI  : dslite --config <target.ccxml> -f -v <firmware.hex>")
-    info("    Install UniFlash: https://www.ti.com/tool/UNIFLASH")
-    info("")
-    info("  METHOD B — ROM serial bootloader via cc2538-bsl:")
-    info("    Hold BTN-1 (or drive the bootloader pin) while resetting to enter")
-    info("    the ROM serial bootloader, then flash over the App/User UART:")
-    info("      git clone https://github.com/JelmerT/cc2538-bsl")
-    info(f"      python3 cc2538-bsl/cc2538-bsl.py -p {port} -e -w -v firmware.hex")
-    info("    Note: on many CC26x2 boards the ROM BSL must be enabled by the")
-    info("    existing firmware / CCFG — Method A is more reliable for a first flash.")
+    info("The CC26X2R1 carries the CC2652R1, so Sniffle's prebuilt hex flashes")
+    info("directly — no from-source build or ARM toolchain needed.")
     info("")
 
-    tool = _check_flash_tool()
-    if tool == "uniflash":
-        info("UniFlash detected — you can flash via the GUI or the dslite backend.")
-        info("  GUI: launch 'uniflash', pick CC2652R1F, load the Sniffle .hex.")
-    elif tool == "dslite":
-        info("dslite detected — flash from the CLI:")
-        info("  dslite --config <target.ccxml> -f -v <sniffle_cc2652r1f_*.hex>")
-        info("  Generate a .ccxml with UniFlash or the CCS target configuration editor.")
+    # ── Locate the prebuilt hex (Quiver downloads it at deploy time) ──────────
+    hex_file = _prebuilt_hex()
+    if hex_file:
+        ok(f"Prebuilt Sniffle firmware ready: {hex_file}")
     else:
-        info("No TI flash tool on PATH — install one of the following:")
-        info("  - TI UniFlash (bundles dslite): https://www.ti.com/tool/UNIFLASH")
-        info("  - Or use cc2538-bsl (Method B) over the serial bootloader.")
-        info("Not flashing automatically — follow the steps above once a tool is present.")
+        warn("Prebuilt Sniffle hex not found under firmware/cc26x2r1/prebuilt/.")
+        if confirm("Download it now (Sniffle CC2652R1 prebuilt)?", default=True):
+            hex_file = _download_prebuilt_hex()
+        if hex_file:
+            ok(f"Downloaded: {hex_file}")
+        else:
+            warn("No prebuilt hex available.")
+            info(f"  Fetch manually: {SNIFFLE_REPO}/releases  (sniffle_cc2652r1.hex)")
+            info("  or run: python3 firmware/download.py --tools cc26x2r1 --yes")
 
-    info("")
-    info("After flashing, the board will run Sniffle and speak the 2 Mbaud")
-    info("Sniffle protocol on the Application/User UART — verify with a capture.")
+    # Let the operator override the path; default to the detected prebuilt hex.
+    hex_path = prompt("Path to the Sniffle .hex to flash",
+                      default=str(hex_file) if hex_file else "")
+    if not hex_path:
+        warn("No firmware path provided. Aborting.")
+        return
+    fw = Path(hex_path)
+    if not fw.exists():
+        err(f"File not found: {fw}")
+        return
+
+    # ── Flash over the onboard XDS110 (TI UniFlash / dslite) ──────────────────
+    tool = _check_flash_tool()
+    if tool == "dslite":
+        if confirm(f"Flash {fw.name} to the CC26X2R1 via XDS110 (dslite)?", default=True):
+            info(f"Running: dslite -f -v {fw}")
+            info("  Do NOT unplug the LaunchPad during flashing.")
+            rc = run_streaming(
+                ["dslite", "-f", "-v", str(fw)],
+                on_line=lambda l: info(f"  dslite: {l}"),
+                timeout=300,
+            )
+            if rc == 0:
+                ok("Sniffle firmware flashed — the board now runs Sniffle.")
+                info("  Proceed to 'BLE Capture' (Sniffle speaks 2 Mbaud on the App UART).")
+            else:
+                err("dslite returned an error.")
+                info("  dslite may need an explicit --config <target.ccxml>; the UniFlash")
+                info("  GUI can export one for the CC2652R1, or load the hex in the GUI.")
+        return
+    if tool == "uniflash":
+        info("UniFlash detected — flash via the GUI:")
+        info(f"  Launch 'uniflash', pick CC2652R1, and load: {fw}")
+        info("  (dslite CLI was not found on PATH; the GUI is the reliable path.)")
+        pause("Press ENTER once flashed.")
+        return
+
+    warn("No TI flash tool (uniflash / dslite) on PATH.")
+    info("  Install TI UniFlash (bundles dslite): https://www.ti.com/tool/UNIFLASH")
+    info(f"  Then re-run this option — the hex is ready at: {fw}")
+    info("  Alternative (Method B) — ROM serial bootloader via cc2538-bsl:")
+    info(f"    git clone https://github.com/JelmerT/cc2538-bsl && "
+         f"python3 cc2538-bsl/cc2538-bsl.py -p {port} -e -w -v {fw}")
     pause("Press ENTER to continue.")
 
 
