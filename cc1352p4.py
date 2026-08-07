@@ -11,23 +11,20 @@ Usage:
 USB VID:PID:
     0x0451:0xBEF3 — TI XDS110 onboard debugger (Application/User UART + Aux CDC)
 
-CRITICAL — THE "-4" BOARD VARIANT (READ THIS BEFORE FLASHING):
-    The LAUNCHXL-CC1352P-4 (the "-4" suffix) is NOT interchangeable with the
-    stock CC1352P1 / CC1352P-2 boards. On the P-4 variant the 2.4 GHz RF signal
-    is routed through the HIGH-POWER PA antenna port (the same front-end path
-    used for Sub-1GHz +20 dBm transmit), NOT through the default 2.4 GHz
-    antenna path used by the other P boards.
+THE "-4" BOARD VARIANT (READ BEFORE FLASHING):
+    The LAUNCHXL-CC1352P-4 carries the CC1352P1F3 silicon. Current Sniffle
+    (v1.11+) uses chip-based platform names and has a SINGLE build for this
+    chip — PLATFORM=CC1352P1F3 — and ships a prebuilt for it
+    (sniffle_cc1352p1_cc2652p1.hex). There is NO separate "-4" build; the old
+    PLATFORM=CC1352P_4 token no longer exists. So the normal path is to FLASH
+    THE PREBUILT (no TI SDK needed); a from-source build is only for modifying
+    Sniffle and additionally requires the TI SimpleLink SDK.
 
-    Consequence: a stock / prebuilt Sniffle image (built for CC1352P1) WILL NOT
-    receive anything on 2.4 GHz BLE on this board — the radio is listening on
-    the wrong RF front-end path and you get an empty capture with no error.
-
-    You MUST BUILD Sniffle firmware yourself with:
-        make PLATFORM=CC1352P_4
-    so the RF frontend / PA path is configured for the -4 antenna routing.
-    Only then will 2.4 GHz BLE reception work. Sub-1GHz also works once built
-    for the correct platform. This is the single most common failure mode for
-    this board — do not skip the build step and flash a prebuilt hex.
+    The "-4" caveat that remains: on this board 2.4 GHz routes through the
+    high-power PA path, so after flashing, run a short BLE capture to confirm
+    reception. If captures are empty despite nearby BLE traffic, the -4 RF
+    routing may need a Sniffle SysConfig adjustment (advanced). Reflashing over
+    SWD is always recoverable, so testing the prebuilt first is low-risk.
 
 XDS110 CDC ports:
     The onboard XDS110 exposes TWO CDC serial ports:
@@ -38,7 +35,7 @@ XDS110 CDC ports:
 
 Sniffle reference (NCC Group):
     Repo   : https://github.com/nccgroup/Sniffle
-    Build  : cd fw && make PLATFORM=CC1352P_4
+    Build  : cd fw && make PLATFORM=CC1352P1F3
     Capture: python3 python_cli/sniff_receiver.py -s <port> -b 2000000 -o out.pcap
     Extcap : sniffle_extcap  (drop into Wireshark's extcap/ dir)
 
@@ -94,10 +91,10 @@ CONNECT_INSTRUCTIONS = (
     "       On macOS both appear as /dev/tty.usbmodem*.\n"
     "    4. If nothing appears: try a different USB port or a data-capable\n"
     "       (not charge-only) micro-USB cable.\n\n"
-    "  REMINDER — THIS IS THE '-4' VARIANT:\n"
-    "    2.4 GHz is routed through the high-power PA antenna path. A prebuilt\n"
-    "    Sniffle image will NOT receive BLE — you must build with\n"
-    "    PLATFORM=CC1352P_4 (see the build menu option).\n\n"
+    "  NOTE — THIS IS THE '-4' VARIANT:\n"
+    "    2.4 GHz routes through the high-power PA path. Current Sniffle has a\n"
+    "    single CC1352P1F3 build for this silicon (a prebuilt hex is provided) —\n"
+    "    flash it, then run a BLE capture to confirm 2.4 GHz reception.\n\n"
     "  Linux permissions:\n"
     "    sudo usermod -aG dialout $USER  (then re-login)\n"
     "    Check: dmesg | tail -20\n"
@@ -152,25 +149,43 @@ def _probe_fw_version() -> dict:
     except Exception as e:
         out["note"] = f"Sniffle Python package unavailable ({e})."
         return out
-    hw = None
-    try:
-        hw = SniffleHW(None, timeout=0.1)          # auto-detects the XDS110 port
-        ver = hw.probe_fw_version()
-        if ver is not None:
-            out["installed"] = True
-            out["version"] = f"{ver.major}.{ver.minor}.{ver.revision}"
-            out["raw"] = str(ver)
-            out["note"] = f"Sniffle detected (API level {ver.api_level})."
-        else:
-            out["note"] = "Board reachable but not running Sniffle (no version response)."
-    except Exception as e:
-        out["note"] = f"Board not detected on serial / probe failed ({e})."
-    finally:
+    # probe_fw_version() does a blocking desync read that never returns when the
+    # board is NOT running Sniffle (its own 0.2s deadline is never re-checked).
+    # Run it in a worker thread and hard-cap it, cancelling the read on timeout.
+    import threading
+    box = {"hw": None}
+
+    def _worker():
         try:
-            if hw is not None:
-                hw.ser.close()
-        except Exception:
-            pass
+            hw = SniffleHW(None, timeout=0.1)      # auto-detects the XDS110 port
+            box["hw"] = hw
+            ver = hw.probe_fw_version()
+            if ver is not None:
+                out["installed"] = True
+                out["version"] = f"{ver.major}.{ver.minor}.{ver.revision}"
+                out["raw"] = str(ver)
+                out["note"] = f"Sniffle detected (API level {ver.api_level})."
+            else:
+                out["note"] = "Board reachable but not running Sniffle (no response)."
+        except Exception as e:
+            out["note"] = f"Board not detected / not running Sniffle ({e})."
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(4.0)
+    if t.is_alive():
+        hw = box.get("hw")
+        if hw is not None:
+            try: hw.cancel_recv()   # break the blocking read
+            except Exception: pass
+        t.join(1.0)
+        if not out["note"]:
+            out["note"] = "No Sniffle response (board likely not flashed) — probe timed out."
+    try:
+        if box.get("hw") is not None:
+            box["hw"].ser.close()
+    except Exception:
+        pass
     return out
 
 
@@ -183,6 +198,33 @@ def probe_fw_version_json() -> None:
 def _sniffle_dir() -> Path:
     """Location of the cloned Sniffle checkout for this tool."""
     return get_firmware_dir("cc1352p4") / "Sniffle"
+
+
+def _prebuilt_hex() -> Path:
+    """Newest downloaded Sniffle CC1352P1F3 prebuilt hex, or None.
+
+    Fetched into firmware/cc1352p4/prebuilt/<tag>/ by firmware/download.py. The
+    CC1352P-4 carries the CC1352P1F3 silicon, so this stock build applies."""
+    pdir = get_firmware_dir("cc1352p4") / "prebuilt"
+    if not pdir.exists():
+        return None
+    hexes = sorted(pdir.rglob("sniffle_cc1352p1*.hex"))
+    return hexes[-1] if hexes else None
+
+
+def _download_prebuilt_hex() -> Path:
+    """Run the Quiver firmware downloader to fetch the CC1352P1F3 prebuilt hex."""
+    dl = Path(__file__).resolve().parent / "firmware" / "download.py"
+    if not dl.exists():
+        warn(f"Firmware downloader not found at {dl}.")
+        return None
+    info("Fetching the Sniffle CC1352P1F3 prebuilt hex via the firmware downloader…")
+    run_streaming(
+        [sys.executable, str(dl), "--tools", "cc1352p4", "--yes"],
+        on_line=lambda l: info(f"  download: {l}"),
+        timeout=600,
+    )
+    return _prebuilt_hex()
 
 
 # ── udev rules ────────────────────────────────────────────────────────────────
@@ -237,7 +279,7 @@ def _check_arm_toolchain():
             info(f"  {ver.strip()}")
         return True
     warn("arm-none-eabi-gcc not found.")
-    info("  Required to compile Sniffle firmware from source (make PLATFORM=CC1352P_4).")
+    info("  Required to compile Sniffle firmware from source (make PLATFORM=CC1352P1F3).")
     flavor = get_os_flavor()
     if flavor == "macos":
         info("  macOS install: brew install --cask gcc-arm-embedded")
@@ -299,7 +341,7 @@ def op_device_info(port: str):
     info("BOARD: LAUNCHXL-CC1352P-4 (the '-4' variant)")
     info("  RF NOTE: 2.4 GHz is routed through the high-power PA antenna port,")
     info("  NOT the default 2.4 GHz path used by CC1352P1 / P-2 boards. Sniffle")
-    info("  firmware MUST be built with PLATFORM=CC1352P_4 or BLE reception fails.")
+    info("  firmware MUST be built with PLATFORM=CC1352P1F3 or BLE reception fails.")
     info("")
     info("XDS110 onboard debugger — VID:PID 0451:BEF3")
     info("  Presents two CDC serial ports:")
@@ -334,7 +376,7 @@ def op_install_sniffle():
     info("Cloning NCC Group Sniffle — the BLE 5 / Sub-1GHz sniffer for TI CC13xx/CC26xx.")
     info("")
     info("Sniffle provides:")
-    info("  • fw/               — the firmware source (build for PLATFORM=CC1352P_4)")
+    info("  • fw/               — the firmware source (build for PLATFORM=CC1352P1F3)")
     info("  • python_cli/       — sniff_receiver.py capture host script")
     info("  • sniffle_extcap    — Wireshark extcap integration")
     info("")
@@ -369,21 +411,21 @@ def op_install_sniffle():
     r = run(f"git clone {SNIFFLE_REPO_URL} {dest}")
     if r.returncode == 0 and dest.exists():
         ok(f"Sniffle cloned to {dest}.")
-        info("  Next: build the firmware with 'Build Sniffle firmware (CC1352P_4)'.")
+        info("  Next: build the firmware with 'Build Sniffle firmware (CC1352P1F3)'.")
     else:
         err("git clone failed.")
         info(f"  Manual: git clone {SNIFFLE_REPO_URL} {dest}")
 
 
 def op_build_firmware():
-    heading("Build Sniffle Firmware (PLATFORM=CC1352P_4)")
+    heading("Build Sniffle Firmware (PLATFORM=CC1352P1F3)")
     info("Building Sniffle firmware for the CC1352P-4's PA antenna path.")
     info("")
     info("WHY YOU MUST BUILD (do not flash a prebuilt image):")
     info("  The '-4' board routes 2.4 GHz through the high-power PA port. A")
     info("  prebuilt Sniffle hex (built for CC1352P1) listens on the wrong RF")
     info("  front-end and receives NOTHING on 2.4 GHz BLE. Building with")
-    info("  PLATFORM=CC1352P_4 configures the RF frontend for the -4 routing.")
+    info("  PLATFORM=CC1352P1F3 configures the RF frontend for the -4 routing.")
     info("")
     info("BUILD REQUIREMENTS:")
     info("  • arm-none-eabi-gcc         — ARM cross-compiler")
@@ -393,7 +435,7 @@ def op_build_firmware():
     info("")
     info("BUILD STEPS (manual reference):")
     info("  cd <Sniffle>/fw")
-    info("  make PLATFORM=CC1352P_4")
+    info("  make PLATFORM=CC1352P1F3")
     info("  # resulting hex lands under fw/  (e.g. sniffle.hex / PROJECT.hex)")
     info("")
 
@@ -422,23 +464,23 @@ def op_build_firmware():
     if not have_gcc:
         warn("ARM toolchain missing — skipping the automatic build.")
         info("  Install arm-none-eabi-gcc and the TI SDK, then re-run this option,")
-        info(f"  or build manually: cd {fw_dir} && make PLATFORM=CC1352P_4")
+        info(f"  or build manually: cd {fw_dir} && make PLATFORM=CC1352P1F3")
         return
 
-    if not confirm(f"Run 'make PLATFORM=CC1352P_4' in {fw_dir} now?", default=True):
+    if not confirm(f"Run 'make PLATFORM=CC1352P1F3' in {fw_dir} now?", default=True):
         info("Build cancelled.")
-        info(f"  Manual: cd {fw_dir} && make PLATFORM=CC1352P_4")
+        info(f"  Manual: cd {fw_dir} && make PLATFORM=CC1352P1F3")
         return
 
-    info(f"Running: make -C {fw_dir} PLATFORM=CC1352P_4")
+    info(f"Running: make -C {fw_dir} PLATFORM=CC1352P1F3")
     info("  The build takes ~1-2 minutes. Watch for compiler/SDK path errors.")
     rc = run_streaming(
-        ["make", "-C", str(fw_dir), "PLATFORM=CC1352P_4"],
+        ["make", "-C", str(fw_dir), "PLATFORM=CC1352P1F3"],
         on_line=lambda l: info(f"  make: {l}"),
         timeout=600,
     )
     if rc == 0:
-        ok("Sniffle firmware built for PLATFORM=CC1352P_4.")
+        ok("Sniffle firmware built for PLATFORM=CC1352P1F3.")
         hexes = list(fw_dir.rglob("*.hex"))
         if hexes:
             info("  Built hex file(s):")
@@ -452,7 +494,7 @@ def op_build_firmware():
         info("    path is set (SIMPLELINK_SDK or the Makefile's SDK variable).")
         info("  - Ensure arm-none-eabi-gcc is on PATH: arm-none-eabi-gcc --version")
         info("  - Read Sniffle's fw/README for the exact SDK version required.")
-        info(f"  - Retry manually: cd {fw_dir} && make PLATFORM=CC1352P_4")
+        info(f"  - Retry manually: cd {fw_dir} && make PLATFORM=CC1352P1F3")
 
 
 def op_flash_firmware():
@@ -475,42 +517,44 @@ def op_flash_firmware():
     elif cur.get("note"):
         info(f"  {cur['note']}")
 
-    # ── Step 1: locate the built hex, and explain clearly if it is missing ────
+    # ── Step 1: locate a hex — prefer the prebuilt (no TI SDK needed) ─────────
+    # The CC1352P-4 carries the CC1352P1F3 silicon; current Sniffle has a single
+    # build for it (there is NO separate "-4" build) and ships a prebuilt hex, so
+    # flashing needs no from-source build. A source build is only for modifying
+    # Sniffle. If 2.4 GHz capture is weak on your -4, see the note after flashing.
     info("")
-    info("IMPORTANT — the CC1352P-4 must run a hex built with PLATFORM=CC1352P_4")
-    info("  (a prebuilt / CC1352P1 image breaks 2.4 GHz BLE on this board).")
-    sniffle = _sniffle_dir()
-    fw_dir = sniffle / "fw"
-    hexes = sorted(fw_dir.rglob("*.hex")) if fw_dir.exists() else []
-    default_hex = str(hexes[0]) if hexes else ""
+    default_hex = ""
+    prebuilt = _prebuilt_hex()
+    if prebuilt:
+        ok(f"Prebuilt Sniffle firmware ready: {prebuilt}")
+        default_hex = str(prebuilt)
+    else:
+        # Fall back to a locally-built hex if one exists.
+        fw_dir = _sniffle_dir() / "fw"
+        built = sorted(fw_dir.rglob("*.hex")) if fw_dir.exists() else []
+        if built:
+            info(f"Using locally-built hex: {built[0]}")
+            default_hex = str(built[0])
+        else:
+            warn("No Sniffle hex found (no prebuilt downloaded, none built).")
+            if confirm("Download the Sniffle CC1352P1F3 prebuilt now?", default=True):
+                prebuilt = _download_prebuilt_hex()
+                if prebuilt:
+                    ok(f"Downloaded: {prebuilt}")
+                    default_hex = str(prebuilt)
+            if not default_hex:
+                info("  Or build from source (Menu → 'Build Sniffle firmware') — that")
+                info("  path needs the TI SimpleLink SDK and is only for modifying Sniffle.")
+                info(f"  Manual prebuilt: {SNIFFLE_REPO_URL}/releases  (sniffle_cc1352p1_cc2652p1.hex)")
 
-    if not default_hex:
-        # This is the case the operator kept hitting: no hex to point at because
-        # the build has not produced one. Say WHY instead of a bare path prompt.
-        warn("No built Sniffle hex found under:")
-        info(f"    {fw_dir}")
-        info("This means the firmware build has not completed yet. Most likely one of:")
-        info("  • The TI SimpleLink CC13xx/CC26xx SDK is not installed / SIMPLELINK_SDK")
-        info("    is unset — the P-4 hex CANNOT be built without it (TI login required).")
-        info("  • arm-none-eabi-gcc was not on PATH when the build ran.")
-        info("Do this first, in order:")
-        info("  1. Menu → 'Build Sniffle firmware (CC1352P_4)' — it checks the toolchain")
-        info("     and reports exactly what is missing.")
-        info("  2. Install any missing piece it names (the SDK is the manual, TI-login")
-        info("     step; arm-gcc installs automatically).")
-        info("  Tip: the CC26X2R1 needs NO build — it flashes a prebuilt hex.")
-        if not confirm("Enter a hex path manually instead?", default=False):
-            return
-        default_hex = ""
-
-    hex_path = prompt("Path to the CC1352P_4 Sniffle .hex file", default=default_hex)
+    hex_path = prompt("Path to the Sniffle .hex to flash", default=default_hex)
     if not hex_path:
         warn("No firmware path provided. Aborting.")
         return
     hex_file = Path(hex_path)
     if not hex_file.exists():
         err(f"File not found: {hex_file}")
-        info("  Build it first via 'Build Sniffle firmware (CC1352P_4)'.")
+        info("  Build it first via 'Build Sniffle firmware (CC1352P1F3)'.")
         return
 
     if not confirm(f"Flash {hex_file.name} to the CC1352P-4 via XDS110?", default=True):
@@ -530,6 +574,11 @@ def op_flash_firmware():
         )
         if rc == 0:
             ok("Sniffle firmware flashed via OpenOCD — proceed to 'BLE Capture'.")
+            info("  NOTE (-4 board): this is the stock CC1352P1F3 build. Run a short")
+            info("  'BLE Capture' to confirm 2.4 GHz reception. If captures come back")
+            info("  empty despite nearby BLE traffic, the -4's high-PA RF routing may")
+            info("  need a Sniffle SysConfig tweak (advanced) — reflashing is always")
+            info("  recoverable over SWD, so testing the prebuilt first is safe.")
             return
         err("OpenOCD flash failed — trying a TI flash tool if one is present.")
     else:
@@ -567,7 +616,7 @@ def op_ble_capture(port: str):
     info("Capturing Bluetooth LE traffic with Sniffle and writing a pcap.")
     info("")
     info("PRE-FLIGHT CHECKLIST:")
-    info("  • Sniffle firmware built with PLATFORM=CC1352P_4 and flashed (this board")
+    info("  • Sniffle firmware built with PLATFORM=CC1352P1F3 and flashed (this board")
     info("    will not receive 2.4 GHz BLE otherwise).")
     info("  • Using the Application/User UART XDS110 port (not the Aux port).")
     info(f"  • Baud rate {BAUD_RATE} (Sniffle default on this firmware).")
@@ -764,7 +813,7 @@ def op_wireshark_extcap():
     info("  3. Click the Sniffle interface gear to set channel / target options.")
     info("  4. Start capture — BLE packets stream live into Wireshark.")
     info("")
-    info("  Note: the extcap still needs the CC1352P_4-built firmware flashed and")
+    info("  Note: the extcap still needs the CC1352P1F3-built firmware flashed and")
     info("  pyserial installed for the host side to work.")
     pause("Press ENTER to continue.")
 
@@ -834,7 +883,7 @@ def main():
 
     info("Detecting TI CC1352P-4 LaunchPad via USB VID:PID 0451:BEF3…")
     info("  XDS110 onboard debugger presents two CDC ports (App/User UART + Aux).")
-    info("  REMINDER: this '-4' board needs Sniffle built with PLATFORM=CC1352P_4")
+    info("  REMINDER: this '-4' board needs Sniffle built with PLATFORM=CC1352P1F3")
     info("  or 2.4 GHz BLE reception will not work (PA antenna path routing).")
 
     found = web_detect_loop(detect_cc1352p4, TOOL_NAME, CONNECT_INSTRUCTIONS, timeout=1800)
@@ -856,7 +905,7 @@ def main():
     MENU_OPTIONS = [
         "Device Info",
         "Install Sniffle tooling",
-        "Build Sniffle firmware (CC1352P_4)",
+        "Build Sniffle firmware (CC1352P1F3)",
         "Flash Sniffle firmware",
         "BLE Capture (Sniffle → pcap)",
         "Crack Pairing (crackle)",

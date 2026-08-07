@@ -266,8 +266,17 @@ FIRMWARE_SOURCES = {
         "name": "LAUNCHXL-CC1352P-4",
         "sources": [
             {
+                # The CC1352P-4 carries the CC1352P1F3 silicon; current Sniffle
+                # has one build for it (there is no separate "-4" build) and ships
+                # a prebuilt, so no TI SDK is needed to get a flashable hex.
+                "label": "Sniffle prebuilt firmware (CC1352P1F3 — ready to flash)",
+                "github": ("nccgroup", "Sniffle"),
+                "asset_pattern": r"sniffle_cc1352p1_cc2652p1\.hex$",
+                "dest_subdir": "prebuilt",
+            },
+            {
                 "type": "gitclone",
-                "label": "Sniffle (NCC Group) — BLE 5 / Sub-1GHz sniffer + host CLI + extcap",
+                "label": "Sniffle (NCC Group) — host CLI + extcap (+ source to build)",
                 "giturl": "https://github.com/nccgroup/Sniffle",
                 "dest_subdir": "Sniffle",
             },

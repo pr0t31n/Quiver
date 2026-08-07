@@ -148,25 +148,42 @@ def probe_fw_version_json() -> None:
     except Exception as e:
         out["note"] = f"Sniffle Python package unavailable ({e})."
         print(json.dumps(out)); return
-    hw = None
-    try:
-        hw = SniffleHW(None, timeout=0.1)          # auto-detects the XDS110 port
-        ver = hw.probe_fw_version()
-        if ver is not None:
-            out["installed"] = True
-            out["version"] = f"{ver.major}.{ver.minor}.{ver.revision}"
-            out["raw"] = str(ver)
-            out["note"] = f"Sniffle detected (API level {ver.api_level})."
-        else:
-            out["note"] = "Board reachable but not running Sniffle (no version response)."
-    except Exception as e:
-        out["note"] = f"Board not detected on serial / probe failed ({e})."
-    finally:
+    # probe_fw_version() blocks forever when the board is NOT running Sniffle
+    # (its desync read never returns). Bound it in a worker thread and cancel.
+    import threading
+    box = {"hw": None}
+
+    def _worker():
         try:
-            if hw is not None:
-                hw.ser.close()
-        except Exception:
-            pass
+            hw = SniffleHW(None, timeout=0.1)      # auto-detects the XDS110 port
+            box["hw"] = hw
+            ver = hw.probe_fw_version()
+            if ver is not None:
+                out["installed"] = True
+                out["version"] = f"{ver.major}.{ver.minor}.{ver.revision}"
+                out["raw"] = str(ver)
+                out["note"] = f"Sniffle detected (API level {ver.api_level})."
+            else:
+                out["note"] = "Board reachable but not running Sniffle (no response)."
+        except Exception as e:
+            out["note"] = f"Board not detected / not running Sniffle ({e})."
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+    t.join(4.0)
+    if t.is_alive():
+        hw = box.get("hw")
+        if hw is not None:
+            try: hw.cancel_recv()
+            except Exception: pass
+        t.join(1.0)
+        if not out["note"]:
+            out["note"] = "No Sniffle response (board likely not flashed) — probe timed out."
+    try:
+        if box.get("hw") is not None:
+            box["hw"].ser.close()
+    except Exception:
+        pass
     print(json.dumps(out))
 
 
