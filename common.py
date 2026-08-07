@@ -1370,6 +1370,96 @@ def ensure_openocd() -> str:
                 run(" ".join(mgr))
                 break
     return shutil.which("openocd") or ""
+
+
+# ── XDS110 board identity ─────────────────────────────────────────────────────
+# The CC1352P-4 and CC26X2R1 LaunchPads both present their onboard XDS110 debug
+# probe as USB 0451:BEF3, so they are INDISTINGUISHABLE by USB descriptor — a
+# hazard, since picking the wrong tool and flashing could target the wrong chip.
+# Each XDS110 has a unique serial number, so we pin serial → board_id once (the
+# operator confirms the physical board) and enforce it from then on.
+XDS110_VID_PID = (0x0451, 0xBEF3)
+XDS110_SHARED_TOOLS = ("cc1352p4", "cc26x2r1")
+XDS110_BOARD_NAMES = {"cc1352p4": "CC1352P-4", "cc26x2r1": "CC26X2R1"}
+_XDS110_PIN_FILE = Path(__file__).resolve().parent / "xds110_boards.json"
+
+
+def read_xds110_serials() -> list:
+    """Serial numbers of all connected XDS110 probes (deduped, order-stable)."""
+    try:
+        import serial.tools.list_ports as _lp
+    except Exception:
+        return []
+    seen = []
+    for p in _lp.comports():
+        if (p.vid, p.pid) == XDS110_VID_PID and p.serial_number:
+            if p.serial_number not in seen:
+                seen.append(p.serial_number)
+    return seen
+
+
+def load_xds110_pins() -> dict:
+    """Return the serial → board_id pin map ({} if none/unreadable)."""
+    import json
+    try:
+        return json.loads(_XDS110_PIN_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def xds110_board(serial: str) -> str:
+    """Return the board_id pinned to this XDS110 serial, or '' if unpinned."""
+    return load_xds110_pins().get(serial, "")
+
+
+def pin_xds110(serial: str, board_id: str) -> bool:
+    """Pin an XDS110 serial to a board_id. Returns True on success."""
+    import json
+    pins = load_xds110_pins()
+    pins[serial] = board_id
+    try:
+        _XDS110_PIN_FILE.write_text(json.dumps(pins, indent=2))
+        return True
+    except Exception as e:
+        warn(f"Could not persist XDS110 identity ({e}).")
+        return False
+
+
+def verify_xds110_identity(board_id: str) -> bool:
+    """Confirm the connected XDS110 really is *board_id* before a risky action
+    (flash/build). Prompts to pin an unknown probe; refuses on a mismatch.
+    Returns True to proceed, False to abort."""
+    name = XDS110_BOARD_NAMES.get(board_id, board_id)
+    serials = read_xds110_serials()
+    if not serials:
+        warn("No XDS110 debug probe detected on USB.")
+        return confirm("Continue anyway?", default=False)
+    if len(serials) > 1:
+        warn(f"Multiple XDS110 probes connected: {', '.join(serials)}.")
+        warn("Connect ONLY the target board to avoid flashing the wrong one.")
+        return confirm("Continue anyway?", default=False)
+    serial = serials[0]
+    pinned = xds110_board(serial)
+    if pinned and pinned != board_id:
+        other = XDS110_BOARD_NAMES.get(pinned, pinned)
+        err(f"SAFETY STOP: the connected probe (serial {serial}) is registered")
+        err(f"  as {other}, but you are in the {name} tool.")
+        err("  These boards share a USB ID — flashing here would target the wrong")
+        err("  board. Aborting. Select the correct tool, or re-pin from its menu.")
+        return False
+    if not pinned:
+        warn(f"Debug probe {serial} has not been identified yet.")
+        warn("The CC1352P-4 and CC26X2R1 share USB 0451:BEF3 and cannot be told")
+        warn("apart automatically — please confirm the physical board.")
+        if not confirm(f"Is the connected board really the {name}?", default=False):
+            info("Aborting — open the tool that matches the connected board.")
+            return False
+        if pin_xds110(serial, board_id):
+            ok(f"Pinned probe {serial} → {name}. Detection is now unambiguous.")
+    return True
+
+
+def ensure_pip_packages(packages: list) -> bool:
     """
     Ensure Python packages are installed via pip.
     packages: list of (import_name, pip_install_spec) tuples.

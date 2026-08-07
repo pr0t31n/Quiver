@@ -48,7 +48,7 @@ from common import (
     require_sudo, sudo_run,
     ensure_apt_packages,
     web_detect_loop, run_streaming,
-    get_firmware_dir, ensure_openocd,
+    get_firmware_dir, ensure_openocd, verify_xds110_identity,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -350,6 +350,12 @@ def op_install_sniffle():
 
 def op_flash_firmware(port: str):
     heading("Flash Sniffle Firmware")
+
+    # ── Guard: confirm this XDS110 is the CC26X2R1, not the CC1352P-4 ─────────
+    # (both share USB 0451:BEF3 — refuse/confirm before touching flash).
+    if not verify_xds110_identity("cc26x2r1"):
+        return
+
     info("Flashing the Sniffle sniffer firmware onto the CC26X2R1 LaunchPad.")
     info("The CC26X2R1 carries the CC2652R1, so Sniffle's prebuilt hex flashes")
     info("directly — no from-source build or ARM toolchain needed.")
@@ -614,6 +620,16 @@ def op_wireshark_extcap():
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def op_identify_board():
+    heading("Identify Board — CC1352P-4 vs CC26X2R1")
+    info("Both LaunchPads present as XDS110 (USB 0451:BEF3) and can only be told")
+    info("apart by the debug probe's serial number. Confirm the physical board")
+    info("once and Quiver pins it, so autodetect and flashing are unambiguous.")
+    info("")
+    if verify_xds110_identity("cc26x2r1"):
+        ok("This debug probe is confirmed as the CC26X2R1.")
+
+
 def main():
     require_sudo()
 
@@ -662,6 +678,7 @@ def main():
         "BLE Capture (Sniffle -> pcap)",
         "Crack Pairing (crackle)",
         "Wireshark extcap setup",
+        "Identify this board (CC1352P-4 vs CC26X2R1)",
         "Exit",
     ]
 
@@ -681,6 +698,8 @@ def main():
         elif choice == 5:
             op_wireshark_extcap()
         elif choice == 6:
+            op_identify_board()
+        elif choice == 7:
             info("Goodbye.")
             break
 

@@ -149,6 +149,15 @@ in the tool registry: **CC1352P-4** and **CC26X2R1** (Sniffle `probe_fw_version`
 over the XDS110 serial), **HackRF One** (`hackrf_info`), and **Ubertooth One**
 (`ubertooth-util -v`). Other devices fall back to "Run script to detect".
 
+**XDS110 board identity.** The CC1352P-4 and CC26X2R1 both present their onboard
+XDS110 debug probe as USB `0451:BEF3`, so they are indistinguishable by USB alone
+— flashing the wrong tool would target the wrong chip. Quiver identifies them by
+the probe's unique **serial number**, pinned to a board (via each tool's *Identify
+this board* menu option, or on first flash) in `xds110_boards.json`. Once pinned,
+autodetect shows only the correct board, and every flash re-checks the serial and
+**refuses** if it belongs to the other board. Unpinned probes are flagged
+`unverified` and require confirmation before flashing.
+
 ### Microcontrollers & Embedded
 
 | Device | Shell | Chip | Notes |

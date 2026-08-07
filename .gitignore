@@ -8,6 +8,9 @@ click_firmware/STM32CubeF4/
 click_firmware/build/
 click_firmware/STM32F429ZITx_FLASH.ld
 
+# Runtime state — XDS110 serial → board pin map (per-install)
+xds110_boards.json
+
 # Python bytecode
 __pycache__/
 *.pyc

@@ -62,7 +62,7 @@ from common import (
     find_serial_port_by_vidpid, ensure_pip_packages, ensure_system_tool,
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
-    web_detect_loop, run_streaming, ensure_openocd,
+    web_detect_loop, run_streaming, ensure_openocd, verify_xds110_identity,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
 )
@@ -458,6 +458,11 @@ def op_build_firmware():
 def op_flash_firmware():
     heading("Flash Sniffle Firmware (over XDS110)")
 
+    # ── Guard: confirm this XDS110 is the CC1352P-4, not the CC26X2R1 ─────────
+    # (both share USB 0451:BEF3 — refuse/confirm before touching flash).
+    if not verify_xds110_identity("cc1352p4"):
+        return
+
     # ── Step 0: passive check — is the board already running Sniffle? ──────────
     info("Checking what firmware is currently on the board (read-only)…")
     cur = _probe_fw_version()
@@ -790,6 +795,16 @@ def check_firmware_version():
         warn("Could not reach GitHub for the Sniffle version check.")
 
 
+def op_identify_board():
+    heading("Identify Board — CC1352P-4 vs CC26X2R1")
+    info("Both LaunchPads present as XDS110 (USB 0451:BEF3) and can only be told")
+    info("apart by the debug probe's serial number. Confirm the physical board")
+    info("once and Quiver pins it, so autodetect and flashing are unambiguous.")
+    info("")
+    if verify_xds110_identity("cc1352p4"):
+        ok("This debug probe is confirmed as the CC1352P-4.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -846,6 +861,7 @@ def main():
         "BLE Capture (Sniffle → pcap)",
         "Crack Pairing (crackle)",
         "Wireshark extcap setup",
+        "Identify this board (CC1352P-4 vs CC26X2R1)",
         "Exit",
     ]
 
@@ -867,6 +883,8 @@ def main():
         elif choice == 6:
             op_wireshark_extcap()
         elif choice == 7:
+            op_identify_board()
+        elif choice == 8:
             info("Goodbye.")
             break
 

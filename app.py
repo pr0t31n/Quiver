@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 import concurrent.futures
 import ipaddress
@@ -1057,6 +1057,44 @@ def _lsusb_present(vid_pids: list, raw: str) -> bool:
     return False
 
 
+# CC1352P-4 and CC26X2R1 both enumerate as XDS110 (0451:BEF3); tell them apart
+# by the probe serial pinned in xds110_boards.json (written by the tool modules).
+_XDS110_VID_PID = (0x0451, 0xBEF3)
+_XDS110_SHARED  = ("cc1352p4", "cc26x2r1")
+
+
+def _xds110_pins() -> dict:
+    try:
+        import json
+        return json.loads((BASE_DIR / "xds110_boards.json").read_text())
+    except Exception:
+        return {}
+
+
+def _detect_xds110_board(tool_id: str, ports: list, st: dict) -> dict:
+    """Resolve connected status for an XDS110-shared board using probe serials.
+    A probe pinned to a different board does NOT count as this tool being present;
+    an unpinned probe counts but is flagged 'unverified' so the UI can warn."""
+    xds = [p for p in ports if (p.vid, p.pid) == _XDS110_VID_PID]
+    if not xds:
+        return st
+    pins = _xds110_pins()
+    match, identity = None, None
+    for p in xds:
+        pinned = pins.get(getattr(p, "serial_number", "") or "", "")
+        if pinned == tool_id:
+            match, identity = p, "confirmed"
+            break
+        if not pinned and match is None:
+            match, identity = p, "unverified"
+        # pinned to a different board → ignore for this tool
+    if match is not None:
+        st.update(connected=True, method="serial", port=match.device,
+                  identity=identity,
+                  xds110_serial=getattr(match, "serial_number", None))
+    return st
+
+
 def _detect_one(tool_id: str, tool: dict,
                 ports: list, usb_raw: str) -> dict:
     """
@@ -1079,6 +1117,11 @@ def _detect_one(tool_id: str, tool: dict,
             pass
 
     # ── 2. Serial port by VID:PID ─────────────────────────────────────────
+    # XDS110-shared boards must be disambiguated by probe serial FIRST, so a
+    # CC26X2R1 does not make the CC1352P-4 look present (and vice versa).
+    if tool_id in _XDS110_SHARED:
+        return _detect_xds110_board(tool_id, ports, st)
+
     vid_pids: list = []
     usb_cfg  = tool.get("usb") or {}
     vid_pids.extend(usb_cfg.get("vid_pids", []))
