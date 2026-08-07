@@ -1,0 +1,13 @@
+# Firmware / tooling fetched per-install by firmware/download.py.
+# These are third-party checkouts (Sniffle, crackle, Adafruit_BLESniffer_Python)
+# and vendor hex — downloaded on each deploy target, never committed.
+/firmware/*/
+
+# Click Shield host-firmware build dependency + artifacts (lazy-cloned/built)
+click_firmware/STM32CubeF4/
+click_firmware/build/
+click_firmware/STM32F429ZITx_FLASH.ld
+
+# Python bytecode
+__pycache__/
+*.pyc

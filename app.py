@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.2.0"
+VERSION = "1.5.0"
 
 import concurrent.futures
 import ipaddress
@@ -821,6 +821,54 @@ TOOLS = {
         },
         "category": "hid",
     },
+
+    # ── TI CC26X2R1 LaunchPad (Sniffle BLE 5 sniffer) ─────────────────────────
+    "cc26x2r1": {
+        "name":   "TI CC26X2R1 LaunchPad",
+        "script": "cc26x2r1.py",
+        "icon":   "📶",
+        "ssh":    None,
+        "shell":  {"type": "none"},
+        "usb": {
+            "vid_pids": [(0x0451, 0xBEF3)],   # XDS110 debug probe
+        },
+    },
+
+    # ── TI CC1352P-4 LaunchPad (Sniffle BLE + Sub-GHz) ────────────────────────
+    "cc1352p4": {
+        "name":   "TI CC1352P-4 LaunchPad",
+        "script": "cc1352p4.py",
+        "icon":   "📶",
+        "ssh":    None,
+        "shell":  {"type": "none"},
+        "usb": {
+            "vid_pids": [(0x0451, 0xBEF3)],   # XDS110 debug probe
+        },
+    },
+
+    # ── Nordic nRF52833-DK (nRF Sniffer BLE) ──────────────────────────────────
+    "nrf52833_dk": {
+        "name":   "Nordic nRF52833-DK",
+        "script": "nrf52833_dk.py",
+        "icon":   "🔷",
+        "ssh":    None,
+        "shell":  {"type": "none"},
+        "usb": {
+            "vid_pids": [(0x1366, 0x1015), (0x1366, 0x1051)],   # SEGGER J-Link OB
+        },
+    },
+
+    # ── Adafruit Bluefruit LE Sniffer (nRF51822, BLE 4.0) ─────────────────────
+    "bluefruit_le_sniffer": {
+        "name":   "Bluefruit LE Sniffer",
+        "script": "bluefruit_le_sniffer.py",
+        "icon":   "🔵",
+        "ssh":    None,
+        "shell":  {"type": "none"},
+        "usb": {
+            "vid_pids": [(0x10C4, 0xEA60)],   # CP2104 USB-UART (shared VID:PID)
+        },
+    },
 }
 
 # ── Tool category groups ───────────────────────────────────────────────────────
@@ -841,6 +889,7 @@ TOOL_GROUPS = {
         "label": "Zigbee / BLE",
         "icon":  "📶",
         "tools": ["cc2531", "sonoff_zbdongle_e", "lilygo_tzigbee", "nordic_nrf52840",
+                  "nrf52833_dk", "cc26x2r1", "cc1352p4", "bluefruit_le_sniffer",
                   "chameleon_ultra"],
     },
     "rfid_nfc": {

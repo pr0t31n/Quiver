@@ -123,7 +123,23 @@ Open **http://localhost:5002** in your browser.
 | **Sonoff ZBDongle-E** | — | `1A86:55D4` / `10C4:EA60` |
 | **LilyGo T-Zigbee v1.2** | Serial UART console | `303A:1001` + others |
 | **Nordic nRF52840** | Serial CDC console | `1915:521F` / `1915:520F` |
+| **Nordic nRF52833-DK** | — (nRF Sniffer via J-Link) | `1366:1015` / `1366:1051` |
+| **TI CC26X2R1 LaunchPad** | — (Sniffle via XDS110) | `0451:BEF3` |
+| **TI CC1352P-4 LaunchPad** | — (Sniffle, PA-path 2.4 GHz) | `0451:BEF3` |
+| **Bluefruit LE Sniffer** | — (nRF Sniffer v2, BLE 4.0) | `10C4:EA60` |
 | **CC2531** | Serial CDC UART | `0451:16AE` |
+
+Firmware/tooling for the four BLE boards above (Sniffle, the nRF Sniffer for
+Bluetooth LE, the Adafruit sniffer host scripts, and crackle) is fetched into
+`firmware/<tool_id>/` by the downloader:
+
+```bash
+python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,bluefruit_le_sniffer --yes
+```
+
+`--yes` runs non-interactively; omit `--tools` to select interactively. Sniffle
+firmware for the CC1352P-4 must still be built with `PLATFORM=CC1352P_4` (see the
+board's menu) because the PA path differs from stock images.
 
 ### Microcontrollers & Embedded
 
@@ -146,10 +162,45 @@ Open **http://localhost:5002** in your browser.
 | Device | Shell | Purpose |
 |--------|-------|---------|
 | **ST-Link V2** | — | STM32 flash/debug via `st-flash` |
-| **Nucleo-F429ZI** | Serial VCP (USART3, 115200) | STM32F429ZI eval board |
+| **Nucleo-F429ZI** | Serial VCP (USART3, 115200) | STM32F429ZI eval board + **Click Shield (mikroBUS) pentest toolkit** |
 | **J-Link EDU Mini** | `JLinkExe` (PTY) | ARM debug / RTT capture |
 | **GreatFET One** | `gf shell` (PTY) | Hardware analysis / SWD |
 | **Cynthion** | — | USB sniffing / Facedancer |
+
+#### Nucleo Click Shield (mikroBUS) pentest toolkit
+
+The Nucleo-F429ZI module includes a configurable **Click Shield** subsystem for the
+chain *Nucleo → MIKROE Click Shield for Nucleo-144 → Click(s) in socket 1–4*. It
+drives the Click peripherals through companion **"Quiver Click" firmware** on the
+STM32 (line protocol over the ST-Link VCP) and exposes per-bus sniffing and
+injection:
+
+| Click | Bus | Sniff | Inject | Flood/DoS | Replay | Other |
+|-------|-----|:---:|:---:|:---:|:---:|-------|
+| CAN SPI (MCP2515) | SPI | ✅ | ✅ | ✅ | ✅ | — |
+| RS485 8 | UART | ✅ | ✅ | ✅ | ✅ | — |
+| RS232 4 | UART | ✅ | ✅ | — | ✅ | — |
+| XBee 2 (802.15.4) | UART | ✅ | ✅ | ✅ | ✅ | — |
+| UWB 3 (DW3000) | SPI | ✅ | — | — | — | range / relay |
+| NFC 2 (PN7150) | I²C | ✅ | — | — | — | read / emulate / relay |
+| 5G NB IoT | UART | — | — | — | — | AT enumeration only |
+
+- **Autodetect** — firmware `SCAN` probes each socket by chip signature (SPI ID /
+  I²C addr / UART response) and auto-populates the config; the shield itself is
+  passive (no ID chip) so it is *inferred* from the Nucleo + detected Clicks.
+  Passive RS-232/RS-485 transceivers can't be uniquely identified and prompt for
+  confirmation.
+- **Diagnostics** — a 6-stage health walk (Nucleo → VCP → firmware → shield →
+  config → per-socket self-test) that pinpoints the first failing link with
+  basic + intermediate remediation and per-Click hints.
+- Config persists to `~/.quiver/click_shield_config.json`; captures to
+  `~/.quiver/click_captures/`.
+- **Authorized testing only** — every active op (inject/flood/replay/emulate/relay)
+  is gated behind an in-scope confirmation. Cellular RF jamming/DoS is intentionally
+  **not** provided (illegal).
+
+> Requires the companion Quiver Click firmware on the STM32 (flash via the module's
+> *Flash Click Firmware* action); the module documents the host↔MCU command protocol.
 
 ---
 
@@ -184,6 +235,7 @@ Each device has a payload library — named scripts stored under `payloads/<devi
 **Zigbee / BLE / LoRa:**
 - `zigbee-channel-survey`, `zigbee-pcap-capture`, `zigbee-replay-attack`, `zigbee-key-extract`, `killerbee-launch`
 - `lora-survey`, `lora-lorawan-sniff`, `lora-replay-test`
+- BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). CC1352P-4 must be built with `PLATFORM=CC1352P_4` (2.4 GHz on the PA path).
 
 **Debug Probes:**
 - Bus Pirate 5: `buspirate-uart-sniff`, `buspirate-i2c-scan`, `buspirate-spi-flash-dump`, `buspirate-jtag-idcode`
@@ -357,7 +409,12 @@ quiver/
 ├── <device>.py         Per-device management script (~45 files)
 ├── requirements.txt    Python dependencies
 ├── firmware/
-│   └── download.py     Firmware auto-downloader
+│   ├── download.py     Firmware auto-downloader (release assets + git repos)
+│   ├── cc1352p4/       Sniffle checkout + crackle (BLE 5 / Sub-1GHz)
+│   ├── cc26x2r1/       Sniffle checkout + crackle (Bluetooth 5 sniffer)
+│   ├── nrf52833_dk/    nRF Sniffer for BLE hex (nrfutil) + crackle
+│   ├── bluefruit_le_sniffer/  Adafruit_BLESniffer_Python + crackle
+│   └── nucleo_f429zi/  STM32CubeF4 (HAL/CMSIS build dep for Click firmware)
 ├── payloads/
 │   ├── payloads.json   Payload index
 │   ├── bash_bunny/     Bash Bunny payloads + stagers
