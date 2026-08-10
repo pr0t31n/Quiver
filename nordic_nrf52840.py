@@ -65,6 +65,7 @@ from common import (
     web_detect_loop, run_streaming,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
+    selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -740,6 +741,46 @@ def _extcap_dir() -> Path:
     return Path.home() / ".config" / "wireshark" / "extcap"
 
 
+def _prep_sniffer_flash(port: str) -> bool:
+    """Firmware-payload PREPARE: obtain the nRF Sniffer hex + a J-Link backend so
+    only the write remains. Returns True only when fully ready."""
+    ready = True
+    if not (find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()):
+        err("  nRF52840-DK J-Link not detected on USB (connect the J-LINK port).")
+        ready = False
+    hexf = _find_sniffer_hex()
+    if not hexf:
+        info("  Fetching the nRF Sniffer firmware…")
+        if run_output("which nrfutil 2>/dev/null || true").strip():
+            run("nrfutil install ble-sniffer 2>/dev/null || true")
+        hexf = _find_sniffer_hex()
+    if hexf and Path(hexf).exists():
+        ok(f"  Firmware ready: {hexf}")
+    else:
+        err("  nRF Sniffer hex unavailable — run: "
+            "python3 firmware/download.py --tools nordic_nrf52840 --yes")
+        ready = False
+    backend = _ensure_flash_backend()
+    if backend:
+        ok(f"  Flash backend ready: {backend}")
+    else:
+        err("  No J-Link flash backend could be provisioned.")
+        ready = False
+    return ready
+
+
+def _autoflash_nrf_sniffer(port: str):
+    """Firmware-payload FLASH: everything is prepped — write the nRF Sniffer hex."""
+    hexf = _find_sniffer_hex()
+    if not hexf or not Path(hexf).exists():
+        err("nRF Sniffer hex missing at flash time — aborting.")
+        return
+    if _flash_dk_hex(hexf, erase_all=False):
+        ok("nRF Sniffer firmware flashed — the DK is now a BLE sniffer.")
+    else:
+        err("Flash failed — re-seat the J-LINK cable and retry.")
+
+
 def op_flash_sniffer_dk(port: str):
     heading("Flash nRF Sniffer Firmware to DK (J-Link)")
     info("Flashing the nRF Sniffer for Bluetooth LE firmware onto the nRF52840-DK")
@@ -1237,6 +1278,22 @@ def main():
 
     if port:
         _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Flash nRF Sniffer (DK)"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_sniffer_flash(port),
+            flash_fn=lambda: _autoflash_nrf_sniffer(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} (nRF52840-DK)",
+                f"Firmware : {fw.get('firmware', 'nRF Sniffer for Bluetooth LE')}",
+                "Flasher  : auto-provisioned J-Link backend (nrfjprog/JLink/nrfutil)",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info",

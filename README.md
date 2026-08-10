@@ -288,6 +288,23 @@ Each device has a payload library — named scripts stored under `payloads/<devi
 - LilyGo T-Deck: `wifi-deauth`, `network-recon`
 - Nordic nRF52840: `ble-fingerprint`, `ble-mitm-setup`
 
+**Firmware Flash (`FIRMWARE - …`):** selecting one of these payloads on a board's
+page **auto-runs the whole flash flow with no interactive menu**. The order is
+strict: show device info → **PREPARE** (perform every download / install / build /
+config — fetch the firmware hex, auto-install the flasher, generate any target
+config) → print a summary → a **single "Are you sure?"** gate → flash. The
+confirmation only appears once everything else is done and the *only* remaining
+step is the write; if prep can't fully ready the device it aborts **before** the
+prompt, so you never confirm a flash on a broken setup.
+- TI CC26X2R1 / CC1352P-4: `Flash Sniffle firmware` — prebuilt Sniffle hex, TI
+  UniFlash (`dslite`) auto-installed, `.ccxml` auto-generated.
+- Nordic nRF52840-DK / nRF52833-DK: `Flash nRF Sniffer firmware` — hex fetched via
+  `nrfutil ble-sniffer`, written over the onboard J-Link (nrfjprog → JLinkExe →
+  OpenOCD).
+- Adafruit Bluefruit LE Sniffer (#2269, nRF51822): `Reflash firmware (J-Link +
+  SWD)` — external SWD programmer only (no DFU path); prep aborts before the
+  confirmation unless an operator-supplied nRF51 hex and a programmer are present.
+
 **Manual (USB Drive) / Platform Audit Scripts:**
 - SysAudit: Windows, Debian, RedHat, macOS
 - PrivescAudit: Windows, Linux, macOS

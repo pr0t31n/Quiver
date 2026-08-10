@@ -679,6 +679,12 @@
       "description": "Setup script for using the nRF52840 Dongle with nRF Sniffer for 802.15.4 firmware and Wireshark. Captures Zigbee, Thread, and other 802.15.4 protocol frames. Requires nRF Sniffer for 802.15.4 firmware and corresponding Wireshark plugin.",
       "path": "payloads/nordic_nrf52840/zigbee-sniffer/setup.sh",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash nRF Sniffer firmware",
+      "description": "Auto-flashes the Nordic 'nRF Sniffer for Bluetooth LE' firmware to the nRF52840-DK over the onboard J-Link (SWD). Runs the full flow with NO interactive menu: shows device info, PREPARES (fetches the sniffer hex via nrfutil ble-sniffer, provisions a J-Link flash backend), prints a summary, and only then shows a single 'Are you sure?' confirmation before writing. Turns the DK into a passive BLE packet sniffer for Wireshark.",
+      "path": "payloads/nordic_nrf52840/firmware/flash-nrf-sniffer.qfw",
+      "added": "2026-08-10T00:00:00Z"
     }
   ],
   "lilygo_tdeck": [
@@ -779,5 +785,37 @@
   ],
   "omg_cable": [],
   "wifi_coconut": [],
-  "rubber_ducky_3": []
+  "rubber_ducky_3": [],
+  "cc26x2r1": [
+    {
+      "name": "FIRMWARE - Flash Sniffle firmware",
+      "description": "Auto-flash the prebuilt Sniffle BLE-sniffer firmware to the CC26X2R1 over the XDS110. Runs with NO interactive menu: shows device info, then prepares everything (downloads the Sniffle hex, auto-installs TI UniFlash/dslite, generates the target config), then a summary and a single 'Are you sure?' confirmation before the flash write.",
+      "path": "payloads/cc26x2r1/firmware/flash-sniffle.qfw",
+      "added": "2026-08-10T00:00:00Z"
+    }
+  ],
+  "cc1352p4": [
+    {
+      "name": "FIRMWARE - Flash Sniffle firmware",
+      "description": "Auto-flash the prebuilt Sniffle BLE-sniffer firmware to the CC1352P-4 over the XDS110. Runs with NO interactive menu: device info, then prepares everything (downloads the Sniffle hex, auto-installs TI UniFlash/dslite, generates the target config), then a summary + single 'Are you sure?' before the flash write.",
+      "path": "payloads/cc1352p4/firmware/flash-sniffle.qfw",
+      "added": "2026-08-10T00:00:00Z"
+    }
+  ],
+  "nrf52833_dk": [
+    {
+      "name": "FIRMWARE - Flash nRF Sniffer firmware",
+      "description": "Auto-flashes the Nordic 'nRF Sniffer for Bluetooth LE' firmware to the nRF52833-DK (PCA10100) over the onboard J-Link (SWD). Runs the full flow with NO interactive menu: device info, PREPARE (download the nRF52833 sniffer hex via nrfutil ble-sniffer, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before flashing. Sniffle does NOT run on Nordic parts — this board uses nRF Sniffer.",
+      "path": "payloads/nrf52833_dk/firmware/flash-nrf-sniffer.qfw",
+      "added": "2026-08-10T00:00:00Z"
+    }
+  ],
+  "bluefruit_le_sniffer": [
+    {
+      "name": "FIRMWARE - Reflash firmware (J-Link + SWD)",
+      "description": "Reflashes the Adafruit Bluefruit LE Sniffer (#2269, nRF51822) over an EXTERNAL SWD programmer (no DFU/USB path exists on this board). Runs with NO interactive menu: device info, PREPARE (locate the operator-supplied nRF51 sniffer hex under the firmware dir, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before writing. Requires SWD wiring (SWDIO/SWCLK/GND/VTref) and an nRF51 firmware image — if either is missing, prep aborts BEFORE the confirmation.",
+      "path": "payloads/bluefruit_le_sniffer/firmware/reflash-firmware.qfw",
+      "added": "2026-08-10T00:00:00Z"
+    }
+  ]
 }

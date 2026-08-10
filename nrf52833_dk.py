@@ -64,6 +64,7 @@ from common import (
     web_detect_loop, run_streaming,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
+    selected_firmware_payload, run_firmware_payload, flash_swd_hex,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -276,6 +277,63 @@ def op_device_info(port: str):
         err(f"nrfjprog error: {e}")
 
     ok("Device info complete.")
+
+
+def _find_sniffer_hex():
+    """Locate the downloaded nRF52833 nRF Sniffer .hex (firmware/download.py drops
+    it under firmware/nrf52833_dk/ble_sniffer/, hex_glob '*nrf52833*')."""
+    base = get_firmware_dir("nrf52833_dk") / "ble_sniffer"
+    for pat in ("*nrf52833*.hex", "*52833*.hex", "*sniffer*.hex"):
+        hits = sorted(base.rglob(pat))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _prep_sniffer_flash(port: str) -> bool:
+    """Firmware-payload PREPARE: fetch the nRF Sniffer hex + a J-Link backend so
+    only the write remains. Returns True only when fully ready."""
+    ready = True
+    if not find_serial_port_by_vidpid(VID_PIDS):
+        err("  nRF52833-DK (J-Link OB) not detected on USB — connect the 'J-LINK' port.")
+        ready = False
+    hexf = _find_sniffer_hex()
+    if not hexf:
+        info("  Fetching the nRF Sniffer firmware (nrfutil ble-sniffer)…")
+        dl = Path(__file__).resolve().parent / "firmware" / "download.py"
+        if dl.exists():
+            run(f"python3 {dl} --tools nrf52833_dk --yes")
+        hexf = _find_sniffer_hex()
+    if hexf and Path(hexf).exists():
+        ok(f"  Firmware ready: {hexf}")
+    else:
+        err("  nRF Sniffer hex unavailable — run: "
+            "python3 firmware/download.py --tools nrf52833_dk --yes")
+        ready = False
+    if run_output("which nrfjprog JLinkExe openocd 2>/dev/null || true").strip():
+        ok("  Flash backend present (nrfjprog/JLink/openocd).")
+    elif get_os_flavor() in ("kali", "debian", "ubuntu", "linux"):
+        info("  Installing openocd (apt) as the J-Link/SWD flash backend…")
+        run("sudo apt-get install -y openocd")
+        if not run_output("which openocd 2>/dev/null || true").strip():
+            err("  No J-Link flash backend could be provisioned.")
+            ready = False
+    else:
+        err("  No J-Link flash backend (install nRF Command Line Tools or SEGGER J-Link).")
+        ready = False
+    return ready
+
+
+def _autoflash_nrf_sniffer(port: str):
+    """Firmware-payload FLASH: everything is prepped — write the nRF Sniffer hex."""
+    hexf = _find_sniffer_hex()
+    if not hexf or not Path(hexf).exists():
+        err("nRF Sniffer hex missing at flash time — aborting.")
+        return
+    if flash_swd_hex(hexf, "nRF52833_xxAA", "NRF52"):
+        ok("nRF Sniffer firmware flashed — the DK is now a BLE sniffer.")
+    else:
+        err("Flash failed — re-seat the J-LINK cable and retry.")
 
 
 def op_flash_sniffer(port: str):
@@ -676,6 +734,22 @@ def main():
     check_firmware_version()
 
     _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Flash nRF Sniffer firmware"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_sniffer_flash(port),
+            flash_fn=lambda: _autoflash_nrf_sniffer(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} (nRF52833-DK, PCA10100)",
+                f"Firmware : {fw.get('firmware', 'nRF Sniffer for Bluetooth LE')}",
+                "Flasher  : nrfjprog/JLink/openocd over the onboard J-Link (SWD)",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info",

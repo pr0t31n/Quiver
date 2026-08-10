@@ -1808,6 +1808,138 @@ def get_selected_payload() -> str:
     return os.environ.get("QUIVER_SELECTED_PAYLOAD", "")
 
 
+# ── Firmware payloads (auto-run a flash from the main-page payload selector) ───
+# A firmware payload is a tiny ".qfw" JSON descriptor selected on the Quiver main
+# page. When present, a tool's main() runs run_firmware_payload() and RETURNS —
+# skipping the interactive menu entirely. The flow streams device info + preflight
+# (aborting up-front on failure), shows a summary, gates on ONE "are you sure?"
+# confirmation, then flashes.
+
+def selected_firmware_payload() -> dict:
+    """If the selected payload is a Quiver firmware descriptor (.qfw), return the
+    parsed dict; else None."""
+    p = get_selected_payload()
+    if not p or not p.endswith(".qfw"):
+        return None
+    try:
+        import json as _json
+        path = Path(p) if os.path.isabs(p) else (Path(__file__).resolve().parent / p)
+        return _json.loads(Path(path).read_text())
+    except Exception:
+        return None
+
+
+def run_firmware_payload(label: str, *, flash_fn, info_fn=None, prepare_fn=None,
+                         summary_lines=None) -> bool:
+    """Auto-run a firmware-flash payload (no interactive menu).
+
+    Order is strict: device info → PREPARE (do every install / download / build /
+    config so nothing is left but the write) → summary → a SINGLE 'are you sure?'
+    gate → flash. prepare_fn MUST perform the actual prep and return True only when
+    the device is fully ready to flash; if it returns False the run aborts BEFORE
+    the confirmation, so the operator never gets to 'are you sure?' on a broken
+    setup. Always returns True so the caller can `return` and skip its menu.
+    """
+    heading(f"FIRMWARE PAYLOAD — {label}")
+    info("Auto-running with no menu. Everything is prepared first; the only")
+    info("confirmation you'll see is the final 'are you sure?' before the write.")
+
+    if info_fn:
+        info("")
+        try:
+            info_fn()
+        except Exception as e:  # noqa: BLE001
+            warn(f"Device-info step raised: {e}")
+
+    if prepare_fn:
+        info("")
+        heading("Preparing — installs, downloads, builds (no flashing yet)")
+        try:
+            ready = bool(prepare_fn())
+        except Exception as e:  # noqa: BLE001
+            err(f"Preparation raised: {e}")
+            ready = False
+        if not ready:
+            info("")
+            err("PREPARATION FAILED — aborting BEFORE the confirmation. Nothing was")
+            err("written to the device. Fix the item(s) above and re-run the payload.")
+            return True
+        ok("Preparation complete — device is ready; only the flash write remains.")
+
+    info("")
+    heading("Summary — review before flashing")
+    for ln in (summary_lines or []):
+        info(f"  {ln}")
+    info("")
+    warn("Everything is prepped. The next step WRITES firmware and cannot be undone.")
+    if not confirm("Are you sure you want to flash this firmware?", default=False):
+        info("Aborted by operator — nothing was flashed.")
+        return True
+
+    info("")
+    heading("Flashing")
+    flash_fn()
+    ok("Firmware payload complete.")
+    return True
+
+
+def flash_swd_hex(hexfile, jlink_device: str, nrfjprog_family: str) -> bool:
+    """Flash a .hex to an nRF SoC over J-Link/SWD — non-interactive, streamed.
+
+    Tries, in order: nrfjprog, SEGGER JLinkExe, then openocd (apt-installed if
+    needed on Linux). jlink_device e.g. 'nRF52840_xxAA' / 'nRF52833_xxAA' /
+    'nRF51822_xxAA'; nrfjprog_family 'NRF52' or 'NRF51'. Returns True on success.
+    """
+    import shutil as _sh
+    import tempfile as _tf
+    hexfile = str(hexfile)
+
+    if _sh.which("nrfjprog"):
+        info("Flashing via nrfjprog (J-Link/SWD)…")
+        rc = run_streaming(["nrfjprog", "--family", nrfjprog_family, "--program",
+                            hexfile, "--sectorerase", "--verify", "--reset"],
+                           on_line=lambda l: info(f"  nrfjprog: {l}"), timeout=300)
+        if rc == 0:
+            return True
+        warn("nrfjprog failed — trying the next backend.")
+
+    jlink = _sh.which("JLinkExe") or _sh.which("JLink")
+    if jlink:
+        info("Flashing via JLinkExe (J-Link/SWD)…")
+        script = Path(_tf.mktemp(suffix=".jlink"))
+        script.write_text(f"si SWD\nspeed 4000\nr\nloadfile {hexfile}\nr\ng\nexit\n")
+        seen = {"ok": False}
+        rc = run_streaming(
+            [jlink, "-device", jlink_device, "-if", "SWD", "-speed", "4000",
+             "-autoconnect", "1", "-nogui", "1", "-ExitOnError", "1",
+             "-CommanderScript", str(script)],
+            on_line=lambda l: (info(f"  jlink: {l}"),
+                               seen.update(ok=("o.k." in l.lower() or seen["ok"]))),
+            timeout=300)
+        try:
+            script.unlink()
+        except OSError:
+            pass
+        if rc == 0 and seen["ok"]:
+            return True
+        warn("JLinkExe failed — trying openocd.")
+
+    if not _sh.which("openocd") and get_os_flavor() in ("kali", "debian", "ubuntu", "linux"):
+        info("Installing openocd (apt) for J-Link/SWD flashing…")
+        run("sudo apt-get install -y openocd")
+    if _sh.which("openocd"):
+        cfg = "nrf51" if nrfjprog_family.upper() == "NRF51" else "nrf52"
+        info(f"Flashing via OpenOCD (J-Link/SWD, target/{cfg}.cfg)…")
+        rc = run_streaming(
+            ["openocd", "-f", "interface/jlink.cfg", "-c", "transport select swd",
+             "-f", f"target/{cfg}.cfg", "-c", f"program {hexfile} verify reset exit"],
+            on_line=lambda l: info(f"  openocd: {l}"), timeout=300)
+        return rc == 0
+
+    err("No J-Link flasher available (nrfjprog / JLinkExe / openocd).")
+    return False
+
+
 # ── Connection verification with interactive retry ────────────────────────────
 
 def verify_device_connection(detect_fn, tool_name: str, instructions: str,

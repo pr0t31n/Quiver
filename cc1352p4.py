@@ -62,6 +62,8 @@ from common import (
     web_detect_loop, run_streaming, verify_xds110_identity, flash_ti_uniflash,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
+    selected_firmware_payload, run_firmware_payload,
+    ensure_ti_uniflash, ensure_ti_ccxml, find_dslite,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -501,6 +503,41 @@ def op_build_firmware():
         info(f"  - Retry manually: cd {fw_dir} && make PLATFORM=CC1352P1F3")
 
 
+def _prep_sniffle_flash(port: str) -> bool:
+    """Firmware-payload PREPARE step for the CC1352P-4: do all prep so only the
+    write remains — confirm identity, obtain the hex, install UniFlash, gen config."""
+    ready = True
+    if not verify_xds110_identity("cc1352p4"):
+        err("  Board identity not confirmed as CC1352P-4 — resolve before flashing.")
+        ready = False
+
+    hex_file = _prebuilt_hex() or _download_prebuilt_hex()
+    if hex_file and Path(hex_file).exists():
+        ok(f"  Firmware ready: {hex_file}")
+    else:
+        err("  Sniffle prebuilt hex unavailable (download failed) — retry: "
+            "python3 firmware/download.py --tools cc1352p4 --yes")
+        ready = False
+
+    dslite = find_dslite() or ensure_ti_uniflash(auto=True)
+    if dslite:
+        ok(f"  Flasher ready (dslite): {dslite}")
+        ensure_ti_ccxml("CC1352P1F3")
+    else:
+        err("  TI UniFlash (dslite) could not be installed — see output above.")
+        ready = False
+    return ready
+
+
+def _autoflash_sniffle(port: str):
+    """Firmware-payload FLASH step: everything is already prepped — just write."""
+    hex_file = _prebuilt_hex()
+    if not hex_file or not Path(hex_file).exists():
+        err("Firmware hex missing at flash time — aborting.")
+        return
+    flash_ti_uniflash(Path(hex_file), device="CC1352P1F3", board_name="CC1352P-4")
+
+
 def op_flash_firmware():
     heading("Flash Sniffle Firmware (over XDS110)")
 
@@ -867,6 +904,23 @@ def main():
     check_firmware_version()
 
     _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Flash Sniffle firmware"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_sniffle_flash(port),
+            flash_fn=lambda: _autoflash_sniffle(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'Sniffle')} (prebuilt hex)",
+                f"Port     : {port}",
+                "Flasher  : TI UniFlash / dslite over the XDS110 cJTAG",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info",

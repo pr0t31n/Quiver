@@ -70,6 +70,7 @@ from common import (
     web_detect_loop, run_streaming,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
+    selected_firmware_payload, run_firmware_payload, flash_swd_hex,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -419,6 +420,61 @@ def op_crack_pairing():
         err(f"crackle error: {e}")
 
 
+def _find_nrf51_hex():
+    """Locate an nRF51 sniffer .hex to flash. There is no automated download source
+    for the Bluefruit sniffer firmware, so the operator drops the image under
+    firmware/bluefruit_le_sniffer/ (any subdir) before selecting the payload."""
+    base = get_firmware_dir("bluefruit_le_sniffer")
+    for pat in ("*nrf51*.hex", "*51822*.hex", "*sniffer*.hex", "*.hex"):
+        hits = sorted(base.rglob(pat))
+        if hits:
+            return hits[0]
+    return None
+
+
+def _prep_reflash(port: str) -> bool:
+    """Firmware-payload PREPARE: confirm an nRF51 hex + a J-Link backend are present
+    so only the SWD write remains. Returns True only when fully ready.
+
+    NOTE: the Bluefruit sniffer (nRF51822) has NO DFU/USB reflash path — an external
+    SWD programmer (J-Link/ST-Link) wired to the SWD pads is required, and the nRF51
+    firmware image is not redistributable, so it must be supplied by the operator."""
+    ready = True
+    hexf = _find_nrf51_hex()
+    if hexf and Path(hexf).exists():
+        ok(f"  Firmware ready: {hexf}")
+    else:
+        err("  No nRF51 sniffer .hex found. Place the image under:")
+        err(f"    {get_firmware_dir('bluefruit_le_sniffer')}")
+        err("  (nRF51822 firmware is not auto-downloadable — supply it manually.)")
+        ready = False
+    if run_output("which nrfjprog JLinkExe openocd 2>/dev/null || true").strip():
+        ok("  Flash backend present (nrfjprog/JLink/openocd).")
+    elif get_os_flavor() in ("kali", "debian", "ubuntu", "linux"):
+        info("  Installing openocd (apt) as the SWD flash backend…")
+        run("sudo apt-get install -y openocd")
+        if not run_output("which openocd 2>/dev/null || true").strip():
+            err("  No SWD flash backend could be provisioned.")
+            ready = False
+    else:
+        err("  No SWD flash backend (install nRF Command Line Tools or SEGGER J-Link).")
+        ready = False
+    warn("  External SWD wiring required: SWDIO/SWCLK/GND/VTref → programmer.")
+    return ready
+
+
+def _autoflash_reflash(port: str):
+    """Firmware-payload FLASH: everything is prepped — write the nRF51 hex over SWD."""
+    hexf = _find_nrf51_hex()
+    if not hexf or not Path(hexf).exists():
+        err("nRF51 sniffer hex missing at flash time — aborting.")
+        return
+    if flash_swd_hex(hexf, "nRF51822_xxAA", "NRF51"):
+        ok("Bluefruit sniffer firmware flashed over SWD.")
+    else:
+        err("Flash failed — check SWD wiring (SWDIO/SWCLK/GND/VTref) and retry.")
+
+
 def op_reflash_firmware():
     heading("Reflash Firmware (J-Link + SWD)")
     info("This is INFORMATIONAL. This tool does NOT perform an automated flash.")
@@ -515,6 +571,22 @@ def main():
     info("  Ships with Nordic nRF Sniffer Firmware V2. No DFU (SWD reflash only).")
 
     _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Reflash firmware (J-Link + SWD)"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_reflash(port),
+            flash_fn=lambda: _autoflash_reflash(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} (Adafruit #2269, nRF51822)",
+                f"Firmware : {fw.get('firmware', 'nRF Sniffer V2 (nRF51)')}",
+                "Flasher  : nrfjprog/JLink/openocd over EXTERNAL SWD (no DFU path)",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info",
