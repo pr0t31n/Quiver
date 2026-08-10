@@ -233,8 +233,15 @@ def _check_udev_rules():
 # ── Tool checks ───────────────────────────────────────────────────────────────
 
 def _check_nrfutil():
-    """Check / install nrfutil."""
-    info("Checking nrfutil (Nordic DFU tool for dongle flashing)…")
+    """Detect nrfutil (Nordic DFU tool for the dongle). NON-DESTRUCTIVE.
+
+    Deliberately does NOT pip-install nrfutil: the legacy PyPI nrfutil pins
+    click==7.1.2, which downgrades the shared interpreter and breaks every Flask
+    app on it (Quiver included), and it also requires enum34, which will not build
+    on modern Python. The DK path does not need nrfutil at all (it flashes via the
+    J-Link backend). Only the DONGLE DFU path needs it.
+    """
+    info("Checking nrfutil (Nordic DFU tool — dongle only)…")
     path = run_output("which nrfutil 2>/dev/null || true")
     if path and path.strip():
         ok(f"nrfutil found: {path.strip()}")
@@ -242,17 +249,11 @@ def _check_nrfutil():
         if ver:
             info(f"  nrfutil version: {ver.strip()}")
         return True
-    warn("nrfutil not found. Installing via pip…")
-    info("  nrfutil is Nordic's official DFU tool for the nRF52840 dongle.")
-    info("  It handles DFU package creation and USB CDC serial flashing.")
-    ensure_pip_packages([("nrfutil", "nrfutil")])
-    path2 = run_output("which nrfutil 2>/dev/null || true")
-    if path2 and path2.strip():
-        ok("nrfutil installed successfully.")
-        return True
-    err("nrfutil still not found after pip install.")
-    info("  Manual install: pip install nrfutil --break-system-packages")
-    info("  Or: pip3 install nrfutil")
+    info("nrfutil not present — the DK does not need it (J-Link backend flashes the DK).")
+    info("  Not auto-installing: the PyPI nrfutil pins an old 'click' that would")
+    info("  break Flask/Quiver on this interpreter. For the DONGLE DFU path, install")
+    info("  Nordic's standalone nrfutil binary from developer.nordicsemi.com/nrfutil,")
+    info("  or run it from an isolated venv/pipx so it can't clobber shared packages.")
     return False
 
 
@@ -280,10 +281,12 @@ def _ensure_flash_backend() -> str:
         info("  Installing SEGGER J-Link via brew cask (segger-jlink)…")
         run("brew install --cask segger-jlink")
     elif flavor in ("kali", "debian", "ubuntu", "linux"):
-        # SEGGER isn't in apt; nrfutil (pip) provides a self-contained backend.
-        info("  Installing nrfutil device backend via pip…")
-        ensure_pip_packages([("nrfutil", "nrfutil")])
-        run("nrfutil install device 2>/dev/null || true")
+        # SEGGER J-Link isn't in apt, and the PyPI nrfutil pins an old 'click' that
+        # breaks Flask apps sharing this interpreter — so do NOT pip-install it.
+        # Use nrfjprog / a standalone nrfutil binary if already present; otherwise
+        # DK flashing needs one installed out-of-band (capture/crackle still work).
+        if run_output("which nrfutil 2>/dev/null || true").strip():
+            run("nrfutil install device 2>/dev/null || true")
     if _jlink_exe():
         ok(f"Flash backend: SEGGER J-Link Commander ({_jlink_exe()}).")
         return "jlink"
