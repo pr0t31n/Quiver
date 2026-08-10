@@ -23,7 +23,10 @@ Device variants:
     nRF52840-DK (PCA10056):
         - Full development kit with Arduino headers
         - Onboard Segger J-Link JTAG debugger
-        - Firmware programming via nrfjprog (J-Link) or DFU
+        - Firmware programming via an auto-provisioned J-Link backend
+          (nrfjprog if present, else SEGGER J-Link Commander, else nrfutil) —
+          no manual tool download required
+        - Detected by its J-Link probe even when it presents no VCOM serial port
         - CDC UART for debug output
 
 Linux serial permissions:
@@ -95,28 +98,25 @@ MIRAGE_REPO    = "https://github.com/RCayre/mirage"
 BUTTERFLY_REPO = "https://github.com/RCayre/butterfly"
 
 CONNECT_INSTRUCTIONS = (
-    "Nordic nRF52840 not detected.\n\n"
+    "Nordic nRF52840 not detected — nothing matching is on the USB bus.\n"
+    "Flashing tools are auto-provisioned; the checks below are PHYSICAL only.\n\n"
+    "  DK (PCA10056) — the on-board J-Link must enumerate (VID 1366):\n"
+    "    1. USB DATA cable, not charge-only — a power-only cable lights the\n"
+    "       board LED but never enumerates (the #1 cause of this message).\n"
+    "    2. Plug into the J-LINK port (short top edge, next to the coin cell),\n"
+    "       NOT the nRF USB port (long bottom edge) — only J-LINK enumerates\n"
+    "       the debugger, and a factory-fresh nRF USB port stays silent.\n"
+    "    3. Power switch SW8 -> ON (and power-source switch on VDD/USB).\n"
+    "    4. Try another USB port / cable if still silent.\n\n"
     "  DONGLE (PCA10059) — VID:PID 1915:520F (app) or 1915:521F (DFU):\n"
-    "    1. Insert nRF52840 dongle into USB port\n"
-    "    2. Application mode: appears as /dev/ttyACM* (1915:520F)\n"
-    "    3. DFU mode: press the side button briefly — LED blinks red\n"
-    "       USB re-enumerates as 1915:521F\n"
-    "    4. If dongle is not detected: try a different USB port or cable\n\n"
-    "  DK (PCA10056) — VID:PID 1366:1015 (J-Link):\n"
-    "    1. Connect nRF52840-DK via USB (J-Link USB port, NOT the nRF USB port)\n"
-    "    2. Install SEGGER J-Link Software:\n"
-    "       Linux: download .deb from https://www.segger.com/downloads/jlink/\n"
-    "              sudo dpkg -i JLink_Linux_*.deb\n"
-    "       macOS: brew install --cask segger-jlink\n"
-    "    3. Install nRF Command Line Tools (nrfjprog):\n"
-    "       From: https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools\n"
-    "       Linux: download .tar.gz, extract, run install.sh\n"
-    "       macOS: brew install --cask nordic-nrf-command-line-tools\n\n"
-    "  Linux permissions:\n"
-    "    sudo usermod -aG dialout $USER  (then re-login)\n"
-    "    sudo usermod -aG plugdev $USER  (for J-Link access)\n"
-    "    Check: dmesg | tail -20\n"
-    "    Check: lsusb | grep -E '1915|1366'"
+    "    1. Insert the dongle; application mode enumerates as 1915:520F.\n"
+    "    2. DFU mode: press the side button briefly — LED pulses red,\n"
+    "       USB re-enumerates as 1915:521F.\n\n"
+    "  Quick physical confirmation (no tools needed):\n"
+    "    macOS: ioreg -p IOUSB -l -w 0 | grep -iE 'idVendor.*(4966|6421)'\n"
+    "    Linux: lsusb | grep -E '1366|1915'\n"
+    "  If those show nothing, the board is not on the bus — it is a cable,\n"
+    "  port, or power issue, and no software can detect it until it enumerates."
 )
 
 UDEV_RULES_CONTENT = (
@@ -134,11 +134,61 @@ UDEV_RULES_CONTENT = (
 UDEV_RULES_PATH = "/etc/udev/rules.d/60-nordic-nrf52840.rules"
 
 
-# ── Detection ─────────────────────────────────────────────────────────────────
+# ── Flash-backend / J-Link tooling (auto-provisioned) ─────────────────────────
+
+def _jlink_exe() -> str:
+    """Locate the SEGGER J-Link Commander binary (the auto-provisioned backend)."""
+    for cand in ("JLinkExe", "JLink"):
+        p = run_output(f"which {cand} 2>/dev/null || true")
+        if p and p.strip():
+            return p.strip()
+    for cand in (
+        "/usr/local/bin/JLinkExe",
+        "/opt/SEGGER/JLink/JLinkExe",
+        "/Applications/SEGGER/JLink/JLinkExe",
+    ):
+        if Path(cand).exists():
+            return cand
+    return ""
+
+
+def _jlink_emus() -> list:
+    """Return J-Link emulator serial numbers currently on USB (authoritative DK probe)."""
+    jlink = _jlink_exe()
+    if not jlink:
+        return []
+    out = run_output(
+        f"printf 'ShowEmuList\\nexit\\n' | {jlink} -nogui 1 2>&1 || true"
+    ) or ""
+    import re
+    return re.findall(r"Serial number:\s*(\d+)", out)
+
+
+def _usb_vidpid_present() -> bool:
+    """Dependency-free USB scan for SEGGER (0x1366) / Nordic (0x1915) via ioreg/lsusb."""
+    if get_os_flavor() == "darwin":
+        out = run_output("ioreg -p IOUSB -l -w 0 2>/dev/null || true") or ""
+        # 0x1366 == 4966, 0x1915 == 6421 in ioreg's decimal idVendor field.
+        return '"idVendor" = 4966' in out or '"idVendor" = 6421' in out
+    out = (run_output("lsusb 2>/dev/null || true") or "").lower()
+    return "1366:" in out or "1915:" in out
+
+
+# ── Detection (multi-method: serial VCOM · J-Link probe · raw USB) ─────────────
 
 def detect_nrf52840() -> bool:
-    info("Scanning USB for nRF52840 (VID:PIDs 1915:521F, 1915:520F, 1366:1015)…")
-    return find_serial_port_by_vidpid(VID_PIDS) is not None
+    info("Scanning for nRF52840 (serial VCOM 1915/1366, J-Link probe, raw USB)…")
+    if find_serial_port_by_vidpid(VID_PIDS) is not None:
+        return True
+    # The DK's identity is the J-Link debugger — it may present no matching VCOM,
+    # so probe the debugger and the raw USB bus directly.
+    if _jlink_emus():
+        info("  Detected via J-Link debug probe (no VCOM required).")
+        return True
+    if _usb_vidpid_present():
+        info("  Detected via raw USB VID match (SEGGER/Nordic on the bus).")
+        return True
+    return False
 
 
 def _identify_variant() -> str:
@@ -147,7 +197,7 @@ def _identify_variant() -> str:
         return "dongle_dfu"
     if find_serial_port_by_vidpid(VID_PID_DONGLE_APP):
         return "dongle_app"
-    if find_serial_port_by_vidpid(VID_PID_DK_JLINK):
+    if find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus():
         return "dk"
     return "unknown"
 
@@ -206,33 +256,109 @@ def _check_nrfutil():
     return False
 
 
-def _check_nrfjprog():
-    """Check for nrfjprog (nRF Command Line Tools)."""
-    info("Checking nrfjprog (nRF Command Line Tools for J-Link programming)…")
-    path = run_output("which nrfjprog 2>/dev/null || true")
-    if path and path.strip():
-        ok(f"nrfjprog found: {path.strip()}")
-        ver = run_output("nrfjprog --version 2>/dev/null || true")
-        if ver:
-            info(f"  nrfjprog version: {ver.strip()}")
-        return True
-    warn("nrfjprog not found.")
-    info("  nrfjprog is part of the nRF Command Line Tools package from Nordic Semiconductor.")
-    info("  Required for J-Link firmware programming on the nRF52840-DK.")
-    info("  Download from: https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools")
+def _ensure_flash_backend() -> str:
+    """Ensure a J-Link flashing backend is available, auto-installing if needed.
+
+    Returns the backend id: 'nrfjprog', 'jlink', 'nrfutil', or '' (none).
+    Fully automated — no manual downloads. Priority: nrfjprog (if a user already
+    has the nRF Command Line Tools) → SEGGER J-Link Commander (auto-installed via
+    brew cask on macOS) → nrfutil device (pip). The DK only needs ONE of these.
+    """
+    info("Ensuring a J-Link flashing backend (auto-provisioned)…")
+
+    if run_output("which nrfjprog 2>/dev/null || true").strip():
+        ok("Flash backend: nrfjprog (nRF Command Line Tools).")
+        return "nrfjprog"
+
+    if _jlink_exe():
+        ok(f"Flash backend: SEGGER J-Link Commander ({_jlink_exe()}).")
+        return "jlink"
+
+    # Auto-install the J-Link Commander backend — no manual download.
     flavor = get_os_flavor()
-    if flavor == "darwin":
-        info("  macOS install: brew install --cask nordic-nrf-command-line-tools")
-        info("  Or: download the macOS .pkg installer from the Nordic website")
-        if confirm("Attempt to install via brew cask?", default=True):
-            ensure_brew_packages(["nordic-nrf-command-line-tools"])
-    else:
-        info("  Linux install:")
-        info("    1. Download the .tar.gz from https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools")
-        info("    2. Extract: tar xzf nRF-Command-Line-Tools_*.tar.gz")
-        info("    3. Run installer: sudo ./install.sh")
-        info("    4. Or install the .deb package if available for your distro")
-        info("  Kali note: The nRF Command Line Tools .deb may work directly.")
+    if flavor == "darwin" and run_output("which brew 2>/dev/null || true").strip():
+        info("  Installing SEGGER J-Link via brew cask (segger-jlink)…")
+        run("brew install --cask segger-jlink")
+    elif flavor in ("kali", "debian", "ubuntu", "linux"):
+        # SEGGER isn't in apt; nrfutil (pip) provides a self-contained backend.
+        info("  Installing nrfutil device backend via pip…")
+        ensure_pip_packages([("nrfutil", "nrfutil")])
+        run("nrfutil install device 2>/dev/null || true")
+    if _jlink_exe():
+        ok(f"Flash backend: SEGGER J-Link Commander ({_jlink_exe()}).")
+        return "jlink"
+
+    # Last resort: nrfutil device (pip). Legacy nrfutil is already ensured for DFU.
+    if run_output("which nrfutil 2>/dev/null || true").strip():
+        run("nrfutil install device 2>/dev/null || true")
+        ok("Flash backend: nrfutil device.")
+        return "nrfutil"
+
+    warn("No flash backend could be provisioned automatically.")
+    info("  Capture/crackle still work; only DK firmware flashing needs a backend.")
+    return ""
+
+
+def _flash_hex_jlink(hexfile: Path, erase_all: bool = False) -> bool:
+    """Flash a .hex to the nRF52840-DK via SEGGER J-Link Commander (auto backend)."""
+    jlink = _jlink_exe()
+    if not jlink:
+        return False
+    import tempfile
+    erase_cmd = "erase" if erase_all else ""
+    script = Path(tempfile.mktemp(suffix=".jlink"))
+    script.write_text(
+        f"si SWD\nspeed 4000\nr\n{erase_cmd}\nloadfile {hexfile}\nr\ng\nexit\n"
+    )
+    cmd = (
+        f"{jlink} -device nRF52840_xxAA -if SWD -speed 4000 "
+        f"-autoconnect 1 -nogui 1 -ExitOnError 1 -CommanderScript {script}"
+    )
+    info(f"Running: {cmd}")
+    ok_flag = {"seen": False, "err": False}
+
+    def _line(l):
+        info(f"  jlink: {l}")
+        low = l.lower()
+        if "o.k." in low or "programming done" in low or "script processing completed" in low:
+            ok_flag["seen"] = True
+        if "cannot connect" in low or "failed" in low or "error" in low:
+            ok_flag["err"] = True
+
+    try:
+        rc = run_streaming(cmd, on_line=_line, timeout=300)
+    finally:
+        script.unlink(missing_ok=True)
+    return rc == 0 and ok_flag["seen"] and not ok_flag["err"]
+
+
+def _flash_dk_hex(hexfile: Path, erase_all: bool = False) -> bool:
+    """Flash a hex to the DK using whichever backend is available (auto)."""
+    backend = _ensure_flash_backend()
+    if backend == "nrfjprog":
+        erase = "--chiperase" if erase_all else "--sectorerase"
+        try:
+            r = run(f"nrfjprog --program {hexfile} {erase} --verify")
+            if r.returncode == 0:
+                run("nrfjprog --reset")
+                return True
+            warn("nrfjprog flash failed — falling back to J-Link Commander…")
+        except FileNotFoundError:
+            pass
+        if _jlink_exe():
+            return _flash_hex_jlink(hexfile, erase_all)
+        return False
+    if backend == "jlink":
+        return _flash_hex_jlink(hexfile, erase_all)
+    if backend == "nrfutil":
+        try:
+            r = run(f"nrfutil device program --firmware {hexfile} "
+                    f"--x-family nrf52 --options reset=RESET_SYSTEM,chip_erase_mode="
+                    f"{'ERASE_ALL' if erase_all else 'ERASE_SECTORS'}")
+            return r.returncode == 0
+        except Exception as e:
+            err(f"nrfutil device program error: {e}")
+            return False
     return False
 
 
@@ -324,23 +450,21 @@ def op_device_info(port: str):
     except Exception as e:
         warn(f"Could not enumerate USB ports via pyserial: {e}")
 
-    # If DK, run nrfjprog --ids
+    # If DK, list the J-Link probe(s) — prefer nrfjprog, else the J-Link backend.
     if variant == "dk":
         info("")
-        info("Running 'nrfjprog --ids' to list J-Link connected devices…")
-        try:
-            r = run("nrfjprog --ids")
-            if r.returncode == 0:
-                ok("nrfjprog device listing complete.")
-            else:
-                warn("nrfjprog --ids returned an error.")
-                info("  Ensure J-Link Software is installed and device is connected.")
-                info("  Install: https://www.segger.com/downloads/jlink/")
-        except FileNotFoundError:
-            warn("nrfjprog not found. Install nRF Command Line Tools.")
-            info("  https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools")
-        except Exception as e:
-            err(f"nrfjprog error: {e}")
+        if run_output("which nrfjprog 2>/dev/null || true").strip():
+            info("Listing J-Link devices (nrfjprog --ids)…")
+            try:
+                run("nrfjprog --ids")
+            except Exception as e:
+                warn(f"nrfjprog --ids error: {e}")
+        emus = _jlink_emus()
+        if emus:
+            ok(f"J-Link probe serial number(s): {', '.join(emus)}")
+        else:
+            warn("No J-Link probe reported by the backend.")
+            info("  If the DK is plugged in: use a data cable on the J-LINK port, SW8 -> ON.")
 
     ok("Device info complete.")
 
@@ -518,45 +642,24 @@ def op_flash_dongle(port: str):
 
 
 def op_flash_dk(port: str):
-    heading("Flash DK via J-Link (nrfjprog)")
+    heading("Flash DK via J-Link (auto backend)")
     info("Programming the nRF52840-DK via the onboard Segger J-Link debugger.")
-    info("This method uses nrfjprog and provides direct flash/erase operations.")
-    info("The DK must be connected via its J-Link USB port (NOT the nRF USB port).")
-    info("")
-    info("WHAT nrfjprog CAN FLASH:")
-    info("  - .hex files (Intel HEX format, standard Nordic firmware format)")
-    info("  - Merged HEX files (bootloader + application + SoftDevice combined)")
-    info("")
-    info("nrfjprog FLASH OPERATIONS:")
-    info("  --sectorerase    Erase only flash sectors being written (default, safer)")
-    info("  --eraseall       Erase full chip before programming (use for clean flash)")
-    info("  --verify         Verify flash contents after write (recommended)")
+    info("The flashing backend is auto-provisioned (nrfjprog if present, else the")
+    info("SEGGER J-Link Commander, else nrfutil) — no manual tool install needed.")
+    info("The DK must be on its J-LINK port (short top edge, NOT the nRF USB port).")
     info("")
 
-    # Verify DK is connected
-    dk_port = find_serial_port_by_vidpid(VID_PID_DK_JLINK)
-    if not dk_port:
-        err("nRF52840-DK (J-Link, 1366:1015) not detected.")
-        info("  Ensure the DK is connected via the J-Link USB port.")
-        info("  The J-Link USB port is labeled 'J-LINK/OB' on the DK board.")
-        info("  Install J-Link Software: https://www.segger.com/downloads/jlink/")
+    # Confirm the DK's J-Link is actually on the bus (probe, not just VCOM).
+    if not (find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()):
+        err("nRF52840-DK J-Link not detected on USB.")
+        info("  It is a physical-layer issue — nothing to configure in software:")
+        info("  - Use a DATA USB cable (not charge-only)")
+        info("  - Plug into the J-LINK port (next to the coin cell), not nRF USB")
+        info("  - Power switch SW8 -> ON")
         return
-
-    info(f"nRF52840-DK detected via J-Link on {dk_port}.")
-
-    # List connected devices
-    info("Running nrfjprog --ids to confirm J-Link connection…")
-    try:
-        r = run("nrfjprog --ids")
-        if r.returncode != 0:
-            warn("nrfjprog --ids failed. J-Link software may not be installed.")
-            info("  Install from: https://www.segger.com/downloads/jlink/")
-            info("  Kali/Debian: sudo dpkg -i JLink_Linux_*.deb")
-            info("  macOS: brew install --cask segger-jlink")
-    except FileNotFoundError:
-        err("nrfjprog not found. Install nRF Command Line Tools.")
-        info("  https://www.nordicsemi.com/Products/Development-tools/nRF-Command-Line-Tools")
-        return
+    emus = _jlink_emus()
+    if emus:
+        ok(f"J-Link probe(s) on USB: {', '.join(emus)}")
 
     hex_path = prompt("Path to firmware .hex file")
     if not hex_path:
@@ -568,46 +671,30 @@ def op_flash_dk(port: str):
         return
     if hex_file.suffix.lower() not in (".hex", ".bin"):
         warn(f"Unexpected file extension: {hex_file.suffix}")
-        info("  nrfjprog typically uses .hex (Intel HEX) format.")
+        info("  J-Link flashing uses .hex (Intel HEX) format.")
         if not confirm("Continue?", default=False):
             return
 
     erase_mode = numbered_menu("Erase mode", [
-        "--sectorerase (recommended — erase only written sectors)",
-        "--eraseall (full chip erase — use for clean reflash)",
+        "Sector erase (recommended — erase only written sectors)",
+        "Full chip erase (use for a clean reflash)",
     ])
-    erase_flag = "--sectorerase" if erase_mode == 0 else "--eraseall"
+    erase_all = erase_mode == 1
 
-    if not confirm(f"Flash {hex_file.name} to nRF52840-DK with {erase_flag}?", default=True):
+    if not confirm(f"Flash {hex_file.name} to nRF52840-DK?", default=True):
         info("Flash cancelled.")
         return
 
-    info(f"Running: nrfjprog --program {hex_file} {erase_flag}")
-    info("  This will flash the nRF52840 via J-Link SWD interface.")
-    info("  The process takes a few seconds. Do NOT disconnect during flashing.")
-    try:
-        r = run(f"nrfjprog --program {hex_file} {erase_flag}")
-        if r.returncode == 0:
-            ok("Firmware flashed via nrfjprog.")
-            info("Resetting the device…")
-            r_reset = run("nrfjprog --reset")
-            if r_reset.returncode == 0:
-                ok("Device reset. New firmware is running.")
-            else:
-                warn("Reset command failed. Try pressing the RESET button on the DK.")
-        else:
-            err("nrfjprog flash failed.")
-            info("Troubleshooting:")
-            info("  - Check J-Link connection: nrfjprog --ids")
-            info("  - Ensure the .hex file is compiled for nRF52840")
-            info("  - If 'No emulator connected': re-seat the USB cable on the J-Link port")
-            info("  - Check udev rules for J-Link access (plugdev group)")
-            info("  - Try: sudo nrfjprog --program " + str(hex_file) + " " + erase_flag)
-            info("  - J-Link firmware update may be needed: JLinkExe → connect → updatefw")
-    except FileNotFoundError:
-        err("nrfjprog not found. Install nRF Command Line Tools.")
-    except Exception as e:
-        err(f"nrfjprog flash error: {e}")
+    info("Flashing via the auto-provisioned J-Link backend — do NOT disconnect…")
+    if _flash_dk_hex(hex_file, erase_all=erase_all):
+        ok("Firmware flashed and device reset — new firmware is running.")
+    else:
+        err("Flash failed.")
+        info("Troubleshooting:")
+        info("  - Re-seat the USB cable on the J-LINK port (data cable, not charge-only)")
+        info("  - Ensure the .hex is built for nRF52840")
+        info("  - Linux: user in the 'plugdev' group for J-Link access")
+        info("  - The J-Link OB firmware may need an update (SEGGER J-Link Configurator)")
 
 
 def _sniffer_fw_dir() -> Path:
@@ -644,43 +731,37 @@ def op_flash_sniffer_dk(port: str):
     info("passive BLE sniffer for Wireshark — the prerequisite for pairing capture.")
     info("")
 
-    dk_port = find_serial_port_by_vidpid(VID_PID_DK_JLINK)
-    if not dk_port:
-        err("nRF52840-DK (J-Link, 1366:1015) not detected.")
-        info("  Connect the DK via its J-LINK/OB USB port, then retry.")
+    if not (find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()):
+        err("nRF52840-DK J-Link not detected on USB.")
+        info("  Connect via the J-LINK port (data cable, not charge-only), SW8 -> ON.")
         info("  The dongle variant flashes the sniffer via 'Flash Dongle (nrfutil DFU)'.")
         return
 
     hexf = _find_sniffer_hex()
     if not hexf:
         warn("No nRF Sniffer .hex found under firmware/nordic_nrf52840/ble_sniffer/.")
-        info("  Fetch it first (nrfutil ble-sniffer component or GitHub release):")
+        info("  Auto-fetching it now (nrfutil ble-sniffer component)…")
+        if run_output("which nrfutil 2>/dev/null || true").strip():
+            run("nrfutil install ble-sniffer 2>/dev/null || true")
+        info("  Or fetch via the downloader:")
         info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
-        info("  Or install manually: nrfutil install ble-sniffer")
-        info("  Then re-run this option.")
-        return
+        hexf = _find_sniffer_hex()
+        if not hexf:
+            info("  Sniffer hex still not present — run the downloader, then retry.")
+            return
     ok(f"nRF Sniffer firmware: {hexf}")
 
-    if not confirm(f"Flash {hexf.name} to the nRF52840-DK via J-Link?", default=True):
+    if not confirm(f"Flash {hexf.name} to the nRF52840-DK?", default=True):
         info("Flash cancelled.")
         return
 
-    cmd = f"nrfjprog --program {hexf} --sectorerase --verify"
-    info(f"Running: {cmd}")
-    try:
-        r = run(cmd)
-        if r.returncode == 0:
-            ok("nRF Sniffer firmware flashed.")
-            run("nrfjprog --reset")
-            ok("Device reset — the DK is now a BLE sniffer.")
-            info("  Next: install the Wireshark extcap plugin, then run 'BLE Capture'.")
-        else:
-            err("nrfjprog flash failed.")
-            info("  Check J-Link: nrfjprog --ids   |   ensure the .hex is for nRF52840")
-    except FileNotFoundError:
-        err("nrfjprog not found. Install nRF Command Line Tools.")
-    except Exception as e:
-        err(f"nrfjprog flash error: {e}")
+    info("Flashing the sniffer via the auto-provisioned J-Link backend…")
+    if _flash_dk_hex(hexf, erase_all=False):
+        ok("nRF Sniffer firmware flashed — the DK is now a BLE sniffer.")
+        info("  Next: 'Wireshark extcap Setup', then 'BLE Capture'.")
+    else:
+        err("Sniffer flash failed.")
+        info("  Re-seat the J-LINK cable (data cable) and ensure the .hex is for nRF52840.")
 
 
 def op_wireshark_extcap():
@@ -906,22 +987,14 @@ def op_ble_mitm():
 
     if bfly_hex:
         ok(f"ButteRFly firmware: {bfly_hex}")
-        dk_port = find_serial_port_by_vidpid(VID_PID_DK_JLINK)
-        if dk_port and confirm("Flash ButteRFly firmware to the DK via J-Link now?",
-                               default=False):
-            cmd = f"nrfjprog --program {bfly_hex} --sectorerase --verify"
-            info(f"Running: {cmd}")
-            try:
-                r = run(cmd)
-                if r.returncode == 0:
-                    run("nrfjprog --reset")
-                    ok("ButteRFly firmware flashed and device reset.")
-                else:
-                    err("nrfjprog flash failed — see output above.")
-            except FileNotFoundError:
-                err("nrfjprog not found. Install nRF Command Line Tools.")
-            except Exception as e:
-                err(f"nrfjprog flash error: {e}")
+        dk_present = find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()
+        if dk_present and confirm("Flash ButteRFly firmware to the DK now?",
+                                  default=False):
+            info("Flashing via the auto-provisioned J-Link backend…")
+            if _flash_dk_hex(bfly_hex, erase_all=False):
+                ok("ButteRFly firmware flashed and device reset.")
+            else:
+                err("ButteRFly flash failed — re-seat the J-LINK data cable and retry.")
     else:
         warn("ButteRFly firmware not found under firmware/nordic_nrf52840/butterfly/.")
         info("  Fetch it via the firmware downloader (built if a toolchain is present):")
@@ -1070,31 +1143,35 @@ def main():
     info("Checking udev rules for nRF52840 USB access…")
     _check_udev_rules()
 
-    info("Checking nrfutil (DFU tool for dongle flashing)…")
+    info("Ensuring nrfutil (DFU tool for dongle flashing)…")
     _check_nrfutil()
 
-    info("Checking nrfjprog (J-Link tool for DK programming)…")
-    _check_nrfjprog()
+    _ensure_flash_backend()
 
-    info("Detecting nRF52840 device via USB VID:PIDs 1915:521F, 1915:520F, 1366:1015…")
+    info("Detecting nRF52840 (serial VCOM · J-Link probe · raw USB)…")
     info("  Dongle DFU mode   : 1915:521F — press side button to activate")
     info("  Dongle app mode   : 1915:520F — normal operation")
-    info("  DK J-Link         : 1366:1015 — J-Link USB port connected")
+    info("  DK J-Link         : VID 1366 — J-LINK port (probe, VCOM optional)")
 
     found = web_detect_loop(detect_nrf52840, TOOL_NAME, CONNECT_INSTRUCTIONS, timeout=1800)
     if not found:
         err("Nordic nRF52840 not detected. Exiting.")
         sys.exit(1)
 
-    port = find_serial_port_by_vidpid(VID_PIDS)
-    if not port:
-        err("Could not resolve serial port after detection. Exiting.")
-        sys.exit(1)
+    # The DK is identified by its J-Link probe and may expose no matching VCOM —
+    # a missing serial port is NOT fatal (flash/capture/crackle don't need it).
+    port = find_serial_port_by_vidpid(VID_PIDS) or ""
+    variant = _identify_variant()
 
-    ok(f"nRF52840 detected on {port}")
+    if port:
+        ok(f"nRF52840 detected on {port}")
+    elif variant == "dk":
+        ok("nRF52840-DK detected via J-Link probe (no VCOM serial port).")
+    else:
+        ok("nRF52840 detected (no serial port resolved).")
+
     check_firmware_version()
 
-    variant = _identify_variant()
     if variant == "dongle_dfu":
         ok("Variant: nRF52840 Dongle — DFU bootloader mode (1915:521F)")
         info("  Device is ready for DFU firmware flashing via nrfutil.")
@@ -1102,13 +1179,14 @@ def main():
         ok("Variant: nRF52840 Dongle — application mode (1915:520F)")
         info("  Press side button to enter DFU mode for firmware flashing.")
     elif variant == "dk":
-        ok("Variant: nRF52840-DK — J-Link JTAG debugger (1366:1015)")
-        info("  Use nrfjprog for firmware programming.")
+        ok("Variant: nRF52840-DK — J-Link JTAG debugger")
+        info("  Firmware programming uses the auto-provisioned J-Link backend.")
         info("  CDC UART debug output may be on a separate /dev/ttyACM* port.")
     else:
         warn("Could not identify specific variant.")
 
-    _check_dialout(port)
+    if port:
+        _check_dialout(port)
 
     MENU_OPTIONS = [
         "Device Info",
@@ -1120,7 +1198,7 @@ def main():
         "BLE MITM (Mirage + ButteRFly — Secure Connections)",
         "Zigbee / Thread NCP Info",
         "Flash Dongle (nrfutil DFU)",
-        "Flash DK (J-Link / nrfjprog)",
+        "Flash DK (J-Link — auto backend)",
         "Create DFU Package",
         "Exit",
     ]
