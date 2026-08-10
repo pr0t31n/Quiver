@@ -94,8 +94,11 @@ SDK_NRF_API_URL = (
 # BLE pairing-crack / MITM tooling repos (fetched by firmware/download.py into
 # firmware/nordic_nrf52840/, mirroring the cc26x2r1 / nrf52833_dk boards).
 CRACKLE_REPO   = "https://github.com/mikeryan/crackle"
-MIRAGE_REPO    = "https://github.com/RCayre/mirage"
-BUTTERFLY_REPO = "https://github.com/RCayre/butterfly"
+# WHAD is the maintained successor to Mirage (same author/team). The nRF52840
+# BLE MITM/sniffer backend is the whad-team ButteRFly firmware, flashed by WHAD's
+# own `winstall`, and driven by the WHAD host tools (wsniff/wanalyze/…).
+WHAD_REPO      = "https://github.com/whad-team/whad-client"
+BUTTERFLY_REPO = "https://github.com/whad-team/butterfly"
 
 CONNECT_INSTRUCTIONS = (
     "Nordic nRF52840 not detected — nothing matching is on the USB bus.\n"
@@ -313,11 +316,14 @@ def _flash_hex_jlink(hexfile: Path, erase_all: bool = False) -> bool:
     script.write_text(
         f"si SWD\nspeed 4000\nr\n{erase_cmd}\nloadfile {hexfile}\nr\ng\nexit\n"
     )
-    cmd = (
-        f"{jlink} -device nRF52840_xxAA -if SWD -speed 4000 "
-        f"-autoconnect 1 -nogui 1 -ExitOnError 1 -CommanderScript {script}"
-    )
-    info(f"Running: {cmd}")
+    # run_streaming() calls Popen(cmd) WITHOUT shell=True, so cmd MUST be an argv
+    # list — a single string would be exec'd as one (nonexistent) filename.
+    cmd = [
+        jlink, "-device", "nRF52840_xxAA", "-if", "SWD", "-speed", "4000",
+        "-autoconnect", "1", "-nogui", "1", "-ExitOnError", "1",
+        "-CommanderScript", str(script),
+    ]
+    info(f"Running: {' '.join(cmd)}")
     ok_flag = {"seen": False, "err": False}
 
     def _line(l):
@@ -706,10 +712,17 @@ def _sniffer_fw_dir() -> Path:
 
 
 def _find_sniffer_hex() -> Path:
-    """Locate an nRF52840 nRF Sniffer .hex under the vendored firmware dir."""
+    """Locate the nRF52840-DK nRF Sniffer .hex under the vendored firmware dir.
+
+    Prefers the DK-specific hex (sniffer_nrf52840dk_nrf52840_*.hex) over the
+    dongle hex — flashing a dongle image to the DK, or vice-versa, is wrong.
+    """
     base = _sniffer_fw_dir()
     if not base.exists():
         return None
+    dk = sorted(base.rglob("*nrf52840dk*.hex"))
+    if dk:
+        return dk[0]
     matches = sorted(base.rglob("*nrf52840*.hex")) or sorted(base.rglob("*.hex"))
     return matches[0] if matches else None
 
@@ -892,7 +905,7 @@ def op_ble_capture(port: str):
     if pcap.exists() and pcap.stat().st_size > 0:
         ok(f"pcap saved: {pcap} ({pcap.stat().st_size // 1024} KB)")
         info("  Legacy pairing? Recover the PIN/TK with 'Crack Pairing (crackle)'.")
-        info("  Secure Connections? crackle can't help — use 'BLE MITM (Mirage)'.")
+        info("  Secure Connections? crackle can't help — use 'BLE MITM (WHAD)'.")
     else:
         warn("No pcap data was written — was any BLE traffic seen?")
         info("  Verify the DK is on nRF Sniffer firmware and following the target.")
@@ -906,7 +919,7 @@ def op_crack_pairing():
     info("IMPORTANT — crackle only cracks BLE LEGACY pairing:")
     info("  - Works on: LE Legacy pairing (JustWorks, Passkey Entry)")
     info("  - For Passkey Entry, the recovered TK IS the 6-digit PIN")
-    info("  - Does NOT work on: LE Secure Connections (ECDH) — use 'BLE MITM (Mirage)'")
+    info("  - Does NOT work on: LE Secure Connections (ECDH) — use 'BLE MITM (WHAD)'")
     info("  The capture MUST contain the full pairing handshake (connect request")
     info("  through key distribution) — capture BEFORE the devices pair.")
     info("")
@@ -963,16 +976,46 @@ def op_crack_pairing():
         info("  - Try crackle -v for verbose output on what it found")
 
 
+def _butterfly_hex_for_dk():
+    """Locate a vendored butterfly.hex, else download it from the whad-team release.
+
+    The DK needs the raw J-Link-flashable hex (butterfly.hex), NOT the makerdiary
+    (mdk) hex and NOT the DFU zip. Returns a Path or None.
+    """
+    bdir = get_firmware_dir("nordic_nrf52840") / "butterfly"
+    if bdir.exists():
+        hits = (sorted(bdir.rglob("butterfly.hex"))
+                or [p for p in sorted(bdir.rglob("*.hex")) if "mdk" not in p.name.lower()]
+                or sorted(bdir.rglob("*.hex")))
+        if hits:
+            return hits[0]
+    try:
+        from common import get_github_release_asset_url, download_firmware
+        tag, _ = check_latest_github_release("whad-team", "butterfly")
+        if tag:
+            url = get_github_release_asset_url("whad-team", "butterfly", tag,
+                                               r"^butterfly\.hex$")
+            if url:
+                bdir.mkdir(parents=True, exist_ok=True)
+                dest = bdir / "butterfly.hex"
+                if download_firmware(url, dest, "ButteRFly"):
+                    return dest
+    except Exception as e:  # noqa: BLE001 — network/asset lookup best-effort
+        warn(f"butterfly.hex download failed: {e}")
+    return None
+
+
 def op_ble_mitm():
-    heading("BLE MITM (Mirage + ButteRFly)")
+    heading("BLE MITM (WHAD + ButteRFly)")
     info("Active man-in-the-middle for BLE — used when the target pairs with LE")
-    info("Secure Connections (which crackle CANNOT break). The nRF52840 sits between")
-    info("the central and peripheral, relaying the connection and capturing/handling")
-    info("the pairing so the passkey/PIN can be intercepted or forced.")
+    info("Secure Connections (which crackle CANNOT break), or to relay a legacy")
+    info("pairing. The nRF52840 runs the whad-team ButteRFly firmware and is driven")
+    info("by the WHAD host tools; the board sits between central and peripheral,")
+    info("relaying the connection and capturing/handling the pairing.")
     info("")
-    info("STACK:")
-    info("  - ButteRFly firmware (RCayre) flashed to the nRF52840 — the radio backend")
-    info("  - Mirage (RCayre) on the host — the BLE attack framework driving it")
+    info("STACK (whad-team, the maintained successor to Mirage):")
+    info("  - ButteRFly firmware (whad-team) on the nRF52840 — the radio backend")
+    info("  - WHAD on the host — sniff/analyze/mitm tooling (pip install whad)")
     info("")
     info("NOTE: LE Secure Connections uses ECDH, so the passkey cannot be recovered")
     info("passively. A MITM works by relaying the pair and either observing Passkey")
@@ -980,52 +1023,68 @@ def op_ble_mitm():
     info("passkey — effectiveness depends on the target's IO capabilities and whether")
     info("it enforces authenticated pairing. Confirm this is in scope for the client.")
     info("")
+    warn("ButteRFly REPLACES the nRF Sniffer firmware on the DK (one firmware at a")
+    warn("time). Re-flash the nRF Sniffer hex via 'Flash nRF Sniffer Firmware to DK'")
+    warn("to return to the passive-capture workflow.")
+    info("")
 
-    # ButteRFly firmware
-    bfly_dir = get_firmware_dir("nordic_nrf52840") / "butterfly"
-    bfly_hex = None
-    if bfly_dir.exists():
-        hits = sorted(bfly_dir.rglob("*nrf52840*.hex")) or sorted(bfly_dir.rglob("*.hex"))
-        bfly_hex = hits[0] if hits else None
+    dk_present = bool(find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus())
+    dongle_present = bool(find_serial_port_by_vidpid(VID_PID_DONGLE_DFU + VID_PID_DONGLE_APP))
 
-    if bfly_hex:
-        ok(f"ButteRFly firmware: {bfly_hex}")
-        dk_present = find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()
-        if dk_present and confirm("Flash ButteRFly firmware to the DK now?",
-                                  default=False):
-            info("Flashing via the auto-provisioned J-Link backend…")
+    if dk_present:
+        # The DK has NO DFU bootloader, so winstall/nrfutil DFU CANNOT flash it
+        # ("No trigger interface found"). Flash the raw butterfly.hex over J-Link.
+        info("nRF52840-DK detected — flashing ButteRFly over J-Link/SWD.")
+        info("  (winstall/nrfutil DFU do NOT work on the DK — no bootloader trigger.)")
+        bfly_hex = _butterfly_hex_for_dk()
+        if not bfly_hex:
+            warn("Could not locate or download butterfly.hex.")
+            info("  Fetch it: python3 firmware/download.py --tools nordic_nrf52840 --yes")
+            info(f"  Or manually: {BUTTERFLY_REPO}/releases (butterfly.hex)")
+        elif confirm(f"Flash {bfly_hex.name} to the DK via J-Link now?", default=False):
             if _flash_dk_hex(bfly_hex, erase_all=False):
-                ok("ButteRFly firmware flashed and device reset.")
+                ok("ButteRFly flashed to the DK.")
+                warn("Now connect the DK's nRF USB port (J3) too: ButteRFly's WHAD")
+                warn("interface appears there (Nordic CDC, VID 1915), NOT on the")
+                warn("J-Link VCOM (SEGGER, VID 1366). Confirm the port with: whadup")
             else:
-                err("ButteRFly flash failed — re-seat the J-LINK data cable and retry.")
+                err("ButteRFly J-Link flash failed — re-seat the J-LINK cable and retry.")
     else:
-        warn("ButteRFly firmware not found under firmware/nordic_nrf52840/butterfly/.")
-        info("  Fetch it via the firmware downloader (built if a toolchain is present):")
-        info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
-        info(f"  Or build from source: {BUTTERFLY_REPO}")
+        # Dongle (PCA10059) — DFU via WHAD's winstall is the right path.
+        winstall = run_output("which winstall 2>/dev/null || true").strip()
+        if not dongle_present:
+            warn("No nRF52840 DK or dongle detected on USB.")
+        if winstall:
+            ok(f"WHAD flasher: {winstall}")
+            if confirm("Flash whad-team ButteRFly to the DONGLE via winstall (DFU)?",
+                       default=False):
+                info("Running: winstall --flash butterfly")
+                r = run("winstall --flash butterfly")
+                if r.returncode == 0:
+                    ok("ButteRFly firmware flashed via winstall.")
+                else:
+                    warn("winstall flash returned non-zero — see output above.")
+                    info("  Put the dongle in DFU mode first (press RESET — LED pulses red).")
+        else:
+            warn("WHAD not installed (winstall not on PATH).")
+            info("  Install the host framework + flasher: pip install whad")
+            info(f"    (source: {WHAD_REPO})")
 
-    # Mirage host framework
+    # WHAD host tools
     info("")
-    mirage = run_output("which mirage 2>/dev/null || true")
-    if mirage and mirage.strip():
-        ok(f"Mirage: {mirage.strip()}")
+    whad = run_output("which wsniff 2>/dev/null || true").strip()
+    if whad:
+        ok(f"WHAD tools present (wsniff: {whad}).")
     else:
-        warn("Mirage not found on PATH.")
-        info("  Install the host framework:")
-        info(f"    git clone {MIRAGE_REPO} && cd mirage && sudo python3 setup.py install")
-        info("  (Debian/Kali; needs the ButteRFly-flashed nRF52840 as the interface.)")
+        warn("WHAD host tools not found — install with: pip install whad")
 
     info("")
-    info("RUN THE MITM (once ButteRFly is flashed and Mirage is installed):")
-    info("  List the interface Mirage sees for the board:")
-    info("    mirage \"ble_info|INTERFACE=butterfly0\"")
-    info("  MITM a connection between a central and the target peripheral:")
-    info("    mirage \"ble_mitm|"
-         "INTERFACE1=butterfly0|INTERFACE2=butterfly1|TARGET=<peripheral_MAC>|"
-         "MASTER_FILE=master.cap|SLAVE_FILE=slave.cap\"")
-    info("  Mirage's ble_mitm captures the SMP pairing on both sides; combine with")
-    info("  its pairing modules to observe/force the passkey. See the Mirage docs for")
-    info("  the exact module chain for your target's pairing mode.")
+    info("RUN (once ButteRFly is flashed and WHAD is installed):")
+    info("  Confirm the board is seen as a WHAD interface:  whadup")
+    info("  Passively recover a LEGACY pairing PIN (the BLE passkey workflow):")
+    info("    wsniff -i <iface> ble --pcap capture.pcap | wanalyze legacy_pairing_cracking")
+    info("  Full active relay: use WHAD's BLE MITM tooling, or the project's")
+    info("  ble-connect.py / ble-spawn.py proxy driven by the recovered PIN.")
     info("")
     pause("Press ENTER to continue.")
 
@@ -1088,38 +1147,26 @@ def op_create_dfu_package():
 
 def check_firmware_version():
     heading("Firmware Version Check")
-    info("Checking nRF52840 firmware version...")
-    info("  For DK boards: firmware version is shown in nrfjprog output")
-    info("  For Dongle (BLE Sniffer): check via nrfutil")
-    current = None
-    try:
-        r_info = run_output("nrfjprog --version 2>/dev/null")
-        if r_info:
-            import re
-            m = re.search(r'nrfjprog\s+([\d.]+)', r_info)
-            if m:
-                info(f"  nrfjprog version: {m.group(1)}")
-    except Exception as e:
-        info(f"  nrfjprog check failed: {e}")
-
-    info("Checking latest nRF BLE Sniffer release on GitHub...")
-    latest, url = check_latest_github_release("NordicSemiconductor", "nRF-Sniffer-for-Bluetooth-LE")
-    if latest:
-        info(f"  Latest BLE Sniffer: {latest}")
-        info(f"  Release: {url}")
-        firmware_dir = get_firmware_dir("nordic_nrf52840") / "ble_sniffer"
-        if not any(firmware_dir.iterdir()) if firmware_dir.exists() else True:
-            if confirm("Download latest BLE Sniffer firmware?", default=False):
-                from common import get_github_release_asset_url, download_firmware
-                asset_url = get_github_release_asset_url(
-                    "NordicSemiconductor", "nRF-Sniffer-for-Bluetooth-LE",
-                    latest, r"nRF_Sniffer.*\.zip$"
-                )
-                if asset_url:
-                    dest = firmware_dir / f"nRF_Sniffer_{latest}.zip"
-                    download_firmware(asset_url, dest, "nRF BLE Sniffer")
+    info("Checking the vendored nRF Sniffer firmware for the nRF52840…")
+    # NOTE: the nRF Sniffer for Bluetooth LE is NOT distributed via GitHub — there
+    # is no such repo. It ships in Nordic's website zip and via nrfutil's
+    # ble-sniffer component. Report the locally-vendored hex instead of hitting a
+    # nonexistent GitHub repo (which previously logged a hard error every run).
+    hexf = _find_sniffer_hex()
+    if hexf:
+        import re
+        m = re.search(r'_(\d+\.\d+\.\d+)\.hex$', hexf.name)
+        ver = m.group(1) if m else "unknown"
+        ok(f"  nRF Sniffer firmware present: {hexf.name} (v{ver})")
     else:
-        warn("Could not reach GitHub for version check.")
+        warn("  No nRF Sniffer firmware on disk yet.")
+        info("  The nRF Sniffer is NOT on GitHub — obtain it via one of:")
+        info("    - nrfutil (modern): nrfutil install ble-sniffer && "
+             "nrfutil ble-sniffer bootstrap")
+        info("    - Nordic site: "
+             "https://www.nordicsemi.com/Products/Development-tools/nRF-Sniffer-for-Bluetooth-LE")
+        info("    - Quiver downloader: "
+             "python3 firmware/download.py --tools nordic_nrf52840 --yes")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1198,7 +1245,7 @@ def main():
         "Wireshark extcap Setup (nRF Sniffer)",
         "BLE Capture (nRF Sniffer -> pcap)",
         "Crack Pairing (crackle — legacy PIN/TK)",
-        "BLE MITM (Mirage + ButteRFly — Secure Connections)",
+        "BLE MITM (WHAD + ButteRFly — Secure Connections)",
         "Zigbee / Thread NCP Info",
         "Flash Dongle (nrfutil DFU)",
         "Flash DK (J-Link — auto backend)",

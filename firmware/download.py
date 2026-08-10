@@ -179,14 +179,12 @@ FIRMWARE_SOURCES = {
                 "dest_subdir": "ble_sniffer",
                 "hex_glob": "*nrf52840*",
             },
-            {
-                # The GitHub release additionally carries the Wireshark extcap
-                # plugin (nrf_sniffer_ble.py) + docs bundled in the zip.
-                "label": "nRF Sniffer package (extcap plugin + docs)",
-                "github": ("NordicSemiconductor", "nRF-Sniffer-for-Bluetooth-LE"),
-                "asset_pattern": r"nRF_Sniffer.*\.zip$",
-                "dest_subdir": "ble_sniffer",
-            },
+            # NOTE: there is NO GitHub repo for the nRF Sniffer for Bluetooth LE —
+            # it ships in Nordic's website zip and via nrfutil's ble-sniffer
+            # component (the nrfutil_sniffer source above vendors the hex, and
+            # nrfutil's share dir also carries the extcap plugin nrf_sniffer_ble.py).
+            # The extcap plugin + full docs zip come from:
+            #   https://www.nordicsemi.com/Products/Development-tools/nRF-Sniffer-for-Bluetooth-LE
             {
                 "type": "gitclone",
                 "label": "crackle — BLE legacy pairing / LTK cracker (recovers the PIN/TK)",
@@ -195,16 +193,18 @@ FIRMWARE_SOURCES = {
                 "build": "make",
             },
             {
-                "type": "gitclone",
-                "label": "ButteRFly — nRF52840 BLE MITM firmware (for LE Secure Connections)",
-                "giturl": "https://github.com/RCayre/butterfly",
+                # The J-Link-flashable raw hex (for the DK). NOT the DFU zip and NOT
+                # the makerdiary (mdk) hex — the DK flashes butterfly.hex over SWD.
+                "label": "ButteRFly (whad-team) — nRF52840 WHAD firmware hex (J-Link)",
+                "github": ("whad-team", "butterfly"),
+                "asset_pattern": r"^butterfly\.hex$",
                 "dest_subdir": "butterfly",
             },
             {
                 "type": "gitclone",
-                "label": "Mirage — BLE attack/MITM host framework (drives ButteRFly)",
-                "giturl": "https://github.com/RCayre/mirage",
-                "dest_subdir": "mirage",
+                "label": "WHAD host framework (wsniff/wanalyze/mitm; flash via winstall)",
+                "giturl": "https://github.com/whad-team/whad-client",
+                "dest_subdir": "whad-client",
             },
         ],
     },

@@ -139,21 +139,26 @@ python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,nordic_nrf528
 
 The **Nordic nRF52840-DK** is a full BLE assessment board in its own right: the
 downloader vendors the nRF52840 nRF Sniffer hex (via nrfutil), the Wireshark
-extcap plugin, `crackle`, and — for LE Secure Connections targets — the
-**ButteRFly** MITM firmware plus the **Mirage** host framework into
-`firmware/nordic_nrf52840/`. The device menu flashes the sniffer over J-Link,
-installs the extcap plugin, captures to pcap, and runs `crackle` to recover a
-**legacy pairing PIN/TK** (or drives a Mirage MITM when the target uses Secure
-Connections).
+extcap plugin, `crackle`, and — for active MITM — the **whad-team ButteRFly**
+firmware plus the **WHAD** host framework into `firmware/nordic_nrf52840/`. The
+device menu flashes the sniffer over J-Link, installs the extcap plugin, captures
+to pcap, and runs `crackle` to recover a **legacy pairing PIN/TK**; for LE Secure
+Connections it flashes ButteRFly (via WHAD's `winstall`) and drives a **WHAD**
+MITM. Note: ButteRFly and the nRF Sniffer hex are mutually exclusive on the DK —
+one firmware at a time.
 
 `--yes` runs non-interactively; omit `--tools` to select interactively. Both TI
 boards use a **prebuilt Sniffle hex** (CC26X2R1 → `sniffle_cc2652r1.hex`,
 CC1352P-4 → `sniffle_cc1352p1_cc2652p1.hex`) — no from-source build or TI SDK is
-needed. **Flashing** these boards requires **TI UniFlash** (`dslite`): the XDS110
-uses 2-pin cJTAG, which OpenOCD cannot drive, so UniFlash is the flasher (free,
-needs a TI account; Quiver auto-discovers `dslite` or guides the GUI). On the
-CC1352P-4, run a BLE capture after flashing to confirm 2.4 GHz reception (the -4
-routes 2.4 GHz through its high-power PA path).
+needed. **Flashing** these boards uses **TI UniFlash** (`dslite`) — the XDS110's
+2-pin cJTAG can't be driven by OpenOCD, only by TI's tool. **Quiver now
+auto-installs UniFlash** the first time you flash a TI board: it downloads the
+unattended installer (macOS `.dmg` / Linux `.run`) to `/opt/ti/uniflash_9.6.0`,
+generates the `dslite` `.ccxml` target config, and flashes — no manual UniFlash
+download or GUI config-export. (If dslite rejects the generated config, export one
+from the UniFlash GUI and set `QUIVER_DSLITE_CCXML`.) On the CC1352P-4, run a BLE
+capture after flashing to confirm 2.4 GHz reception (the -4 routes 2.4 GHz through
+its high-power PA path).
 
 **Passive firmware detection.** The Firmware tab reads the installed version
 directly off the device — read-only, no flashing — so you can see whether the
@@ -267,7 +272,7 @@ Each device has a payload library — named scripts stored under `payloads/<devi
 - `zigbee-channel-survey`, `zigbee-pcap-capture`, `zigbee-replay-attack`, `zigbee-key-extract`, `killerbee-launch`
 - `lora-survey`, `lora-lorawan-sniff`, `lora-replay-test`
 - BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52840-DK, nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). TI boards flash prebuilt Sniffle hexes via **TI UniFlash** (`dslite`; OpenOCD can't drive the XDS110 cJTAG).
-- BLE PIN interception (nRF52840-DK): flash nRF Sniffer over J-Link → capture the pairing → `crackle` recovers the **legacy** Passkey/TK (the 6-digit PIN) and decrypts the link. For **LE Secure Connections** (ECDH — not crackable passively), the board flashes **ButteRFly** firmware and runs an active MITM via **Mirage**.
+- BLE PIN interception (nRF52840-DK): flash nRF Sniffer over J-Link → capture the pairing → `crackle` recovers the **legacy** Passkey/TK (the 6-digit PIN) and decrypts the link. For **LE Secure Connections** (ECDH — not crackable passively), the board flashes **whad-team ButteRFly** firmware (`winstall --flash butterfly`) and runs an active MITM via **WHAD**.
 
 **Debug Probes:**
 - Bus Pirate 5: `buspirate-uart-sniff`, `buspirate-i2c-scan`, `buspirate-spi-flash-dump`, `buspirate-jtag-idcode`
@@ -445,7 +450,7 @@ quiver/
 │   ├── cc1352p4/       Sniffle checkout + crackle (BLE 5 / Sub-1GHz)
 │   ├── cc26x2r1/       Sniffle checkout + crackle (Bluetooth 5 sniffer)
 │   ├── nrf52833_dk/    nRF Sniffer for BLE hex (nrfutil) + crackle
-│   ├── nordic_nrf52840/  nRF Sniffer hex + extcap + crackle + ButteRFly/Mirage (MITM)
+│   ├── nordic_nrf52840/  nRF Sniffer hex + extcap + crackle + ButteRFly/WHAD (MITM)
 │   ├── bluefruit_le_sniffer/  Adafruit_BLESniffer_Python + crackle
 │   └── nucleo_f429zi/  STM32CubeF4 (HAL/CMSIS build dep for Click firmware)
 ├── payloads/

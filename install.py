@@ -211,17 +211,16 @@ def ensure_homebrew():
 
 def print_ti_toolchain_notice():
     """The TI LaunchPads (CC1352P-4 / CC26X2R1) need TI UniFlash to flash — OpenOCD
-    cannot drive their XDS110 cJTAG. UniFlash is login-gated, so guide the user."""
-    banner("TI UniFlash — required to flash the CC1352P-4 / CC26X2R1 (manual, one-time)")
+    cannot drive their XDS110 cJTAG. Quiver now AUTO-INSTALLS UniFlash on demand."""
+    banner("TI UniFlash — auto-installed by Quiver on first CC1352P-4 / CC26X2R1 flash")
     info("These LaunchPads flash over the onboard XDS110 using 2-pin cJTAG, which")
     info("only TI UniFlash's 'dslite' handles correctly (OpenOCD cannot).")
-    info("  • TI UniFlash (free; requires a TI account):")
-    info("    https://www.ti.com/tool/UNIFLASH")
-    info("    Install once; Quiver auto-discovers dslite (PATH includes the TI dirs),")
-    info("    or use the UniFlash GUI (auto-detects the board, load the hex, flash).")
-    info("Firmware itself needs NO TI login — Quiver downloads the prebuilt Sniffle")
-    info("hex for both boards. The TI SimpleLink SDK is only needed if you want to")
-    info("BUILD Sniffle from source (advanced): https://www.ti.com/tool/SIMPLELINK-LOWPOWER-F2-SDK")
+    info("  • Quiver downloads + installs UniFlash unattended the first time you flash")
+    info(f"    a TI board (to /opt/ti/uniflash_*), then generates the target config and")
+    info("    runs dslite for you — no TI account needed for the direct-download build.")
+    info("  • Nothing to do here at install time; it happens on demand at flash time.")
+    info("Firmware itself is auto-downloaded (prebuilt Sniffle hex). The TI SimpleLink")
+    info("SDK is only needed to BUILD Sniffle from source (advanced).")
 
 def install_system():
     banner("Phase: system packages")
@@ -292,20 +291,15 @@ def install_git():
     else:
         info("crackle already present — skipping build.")
 
-    # Mirage — BLE attack/MITM host framework (drives the ButteRFly-flashed
-    # nRF52840 for LE Secure Connections MITM). Best-effort install.
-    if not shutil.which("mirage"):
-        mirage_dest = "/opt/mirage"
-        git_clone_or_update("https://github.com/RCayre/mirage", mirage_dest)
-        if os.path.isfile(os.path.join(mirage_dest, "setup.py")):
-            info("Installing Mirage (python3 setup.py install) …")
-            step(f"{sys.executable} setup.py install  (cwd={mirage_dest})")
-            subprocess.run([sys.executable, "setup.py", "install"],
-                           cwd=mirage_dest, check=False)
-        else:
-            info("Mirage cloned to /opt/mirage — install per its README when needed.")
-    else:
-        info("Mirage already present — skipping install.")
+    # WHAD — BLE attack/MITM host framework (whad-team; drives the ButteRFly-
+    # flashed nRF52840). Deliberately NOT installed into this shared interpreter:
+    # WHAD is a Linux-side tool used by the nRF52840 BLE MITM workflow, and pulling
+    # a large dependency set into the Flask interpreter risks breaking Quiver (cf.
+    # the nrfutil/click incident). Install it on the operating host with:
+    #     pip install whad         # host tools: wsniff, wanalyze, winstall
+    #     winstall --flash butterfly   # flash whad-team ButteRFly to the DK
+    info("WHAD (BLE MITM framework) is NOT auto-installed into Quiver's interpreter.")
+    info("  On the sniffing host run:  pip install whad  &&  winstall --flash butterfly")
 
 # ---------------------------------------------------------------------------
 # Service files

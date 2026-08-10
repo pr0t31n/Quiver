@@ -1388,6 +1388,151 @@ def find_dslite() -> str:
     return ""
 
 
+# ── TI UniFlash auto-install (the XDS110 dslite flasher) ──────────────────────
+# UniFlash is the ONLY tool that flashes CC13xx/CC26xx over the XDS110 cJTAG
+# (OpenOCD cannot). It's an Install4j installer that supports unattended mode, so
+# we download + install it headlessly on first flash.
+UNIFLASH_VERSION = "9.6.0"
+UNIFLASH_URL_MAC = ("https://dr-download.ti.com/software-development/software-programming-tool/"
+                    "MD-QeJBJLj8gq/9.6.0/uniflash_sl.9.6.0.5764.dmg")
+UNIFLASH_URL_LINUX = ("https://dr-download.ti.com/software-development/software-programming-tool/"
+                      "MD-QeJBJLj8gq/9.6.0/uniflash_sl.9.6.0.5764.run")
+UNIFLASH_PREFIX = f"/opt/ti/uniflash_{UNIFLASH_VERSION}"
+
+_CCXML_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<configurations XML_version="1.2" id="configurations_0">
+    <configuration XML_version="1.2" id="configuration_0">
+        <instance XML_version="1.2" desc="Texas Instruments XDS110 USB Debug Probe" href="connections/TIXDS110_Connection.xml" id="Texas Instruments XDS110 USB Debug Probe" xml="TIXDS110_Connection.xml" xmlpath="connections"/>
+        <connection XML_version="1.2" id="Texas Instruments XDS110 USB Debug Probe">
+            <platform XML_version="1.2" id="platform_0">
+                <instance XML_version="1.2" desc="{device}" href="devices/{devxml}" id="{device}" xml="{devxml}" xmlpath="devices"/>
+            </platform>
+        </connection>
+    </configuration>
+</configurations>
+'''
+_TI_DEVICE_XML = {"CC2652R1F": "cc2652r1f.xml", "CC1352P1F3": "cc1352p1f3.xml"}
+
+
+def ensure_ti_uniflash(auto: bool = None) -> str:
+    """Ensure TI UniFlash's dslite is installed; auto-download + install if missing.
+
+    auto=True installs without prompting; auto=False never installs; auto=None
+    (default) asks. Returns the dslite path, or '' if unavailable.
+    """
+    d = find_dslite()
+    if d:
+        return d
+    flavor = get_os_flavor()
+    if flavor == "darwin":
+        url = UNIFLASH_URL_MAC
+    elif flavor in ("kali", "debian", "ubuntu", "linux"):
+        url = UNIFLASH_URL_LINUX
+    else:
+        warn(f"No automated TI UniFlash installer for OS '{flavor}'. Install manually.")
+        return ""
+    warn("TI UniFlash (dslite) is not installed — required to flash these boards.")
+    info(f"  Auto-install downloads ~600 MB and installs unattended to {UNIFLASH_PREFIX}")
+    info("  (a few minutes). UniFlash is the only tool that drives the XDS110 cJTAG.")
+    if auto is False:
+        return ""
+    if auto is None and not confirm("Download + install TI UniFlash automatically now?",
+                                    default=True):
+        return ""
+    try:
+        if flavor == "darwin":
+            _install_uniflash_macos(url)
+        else:
+            _install_uniflash_linux(url)
+    except Exception as e:  # noqa: BLE001 — surface any installer failure, keep going
+        err(f"UniFlash auto-install error: {e}")
+    d = find_dslite()
+    if d:
+        ok(f"TI UniFlash installed — dslite: {d}")
+    else:
+        err("UniFlash still not found after install — check the output above.")
+        info("  Manual fallback: https://www.ti.com/tool/UNIFLASH")
+    return d
+
+
+def _install_uniflash_linux(url: str):
+    import tempfile
+    run_file = Path(tempfile.gettempdir()) / f"uniflash_sl_{UNIFLASH_VERSION}.run"
+    if not (run_file.exists() and run_file.stat().st_size > 100_000_000):
+        info("Downloading TI UniFlash (Linux .run)…")
+        download_firmware(url, run_file, "TI UniFlash")
+    if not (run_file.exists() and run_file.stat().st_size > 100_000_000):
+        err("UniFlash download failed or incomplete.")
+        return
+    run(f"chmod +x '{run_file}'")
+    Path("/opt/ti").mkdir(parents=True, exist_ok=True)
+    info(f"Running unattended UniFlash install → {UNIFLASH_PREFIX} …")
+    run_streaming([str(run_file), "--mode", "unattended", "--unattendedmodeui", "none",
+                   "--prefix", UNIFLASH_PREFIX],
+                  on_line=lambda l: info(f"  uniflash: {l}"), timeout=1800)
+
+
+def _install_uniflash_macos(url: str):
+    import tempfile
+    import glob as _glob
+    dmg = Path(tempfile.gettempdir()) / f"uniflash_sl_{UNIFLASH_VERSION}.dmg"
+    if not (dmg.exists() and dmg.stat().st_size > 100_000_000):
+        info("Downloading TI UniFlash (macOS .dmg)…")
+        download_firmware(url, dmg, "TI UniFlash")
+    if not (dmg.exists() and dmg.stat().st_size > 100_000_000):
+        err("UniFlash download failed or incomplete.")
+        return
+    mnt = "/tmp/quiver_uniflash_mnt"
+    run(f"hdiutil detach '{mnt}' 2>/dev/null || true")
+    info("Mounting the UniFlash dmg…")
+    if run(f"hdiutil attach '{dmg}' -nobrowse -mountpoint '{mnt}'").returncode != 0:
+        err("Failed to mount the UniFlash dmg.")
+        return
+    apps = sorted(_glob.glob(f"{mnt}/*.app"))
+    if not apps:
+        err("No installer .app inside the dmg.")
+        run(f"hdiutil detach '{mnt}'")
+        return
+    staged = Path(tempfile.gettempdir()) / "uniflash_installer.app"
+    run(f"rm -rf '{staged}'")
+    run(f"cp -R '{apps[0]}' '{staged}'")
+    run(f"hdiutil detach '{mnt}'")
+    run(f"xattr -r -d com.apple.quarantine '{staged}' 2>/dev/null || true")
+    stub = ""
+    for c in sorted(_glob.glob(f"{staged}/Contents/MacOS/*")):
+        if os.access(c, os.X_OK):
+            stub = c
+            break
+    if not stub:
+        err("Could not find the installer executable inside the .app.")
+        return
+    Path("/opt/ti").mkdir(parents=True, exist_ok=True)
+    info(f"Running unattended UniFlash install → {UNIFLASH_PREFIX} …")
+    run_streaming([stub, "-q", "-dir", UNIFLASH_PREFIX],
+                  on_line=lambda l: info(f"  uniflash: {l}"), timeout=1800)
+
+
+def ensure_ti_ccxml(device: str, ccxml_env: str = "QUIVER_DSLITE_CCXML") -> str:
+    """Return a dslite target-config (.ccxml) for *device*, generating one if the
+    QUIVER_DSLITE_CCXML env var isn't already set. Best-effort: if dslite rejects
+    the generated config, export one from the UniFlash GUI and set the env var."""
+    env = os.environ.get(ccxml_env, "")
+    if env and os.path.isfile(env):
+        return env
+    cfg_dir = Path(UNIFLASH_PREFIX) / "quiver_configs"
+    try:
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        cfg_dir = get_firmware_dir("ti_uniflash")
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+    devxml = _TI_DEVICE_XML.get(device, device.lower() + ".xml")
+    ccxml = cfg_dir / f"{device}.ccxml"
+    ccxml.write_text(_CCXML_TEMPLATE.format(device=device, devxml=devxml))
+    os.environ[ccxml_env] = str(ccxml)
+    info(f"Generated dslite target config: {ccxml}")
+    return str(ccxml)
+
+
 def flash_ti_uniflash(hex_path, device: str, board_name: str,
                       ccxml_env: str = "QUIVER_DSLITE_CCXML") -> bool:
     """Flash a hex to a TI XDS110 LaunchPad using UniFlash's dslite CLI when a
@@ -1399,8 +1544,10 @@ def flash_ti_uniflash(hex_path, device: str, board_name: str,
     device: TI device name, e.g. 'CC1352P1F3' or 'CC2652R1F'.
     """
     hex_path = str(hex_path)
-    dslite = find_dslite()
+    dslite = find_dslite() or ensure_ti_uniflash()   # auto-install UniFlash if missing
     ccxml = os.environ.get(ccxml_env, "")
+    if dslite and not (ccxml and os.path.isfile(ccxml)):
+        ccxml = ensure_ti_ccxml(device, ccxml_env)   # auto-generate a target config
 
     if dslite and ccxml and os.path.isfile(ccxml):
         info(f"Flashing via dslite: {dslite}")
