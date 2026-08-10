@@ -418,14 +418,18 @@ def op_install_sniffle():
 
 
 def op_build_firmware():
-    heading("Build Sniffle Firmware (PLATFORM=CC1352P1F3)")
-    info("Building Sniffle firmware for the CC1352P-4's PA antenna path.")
+    heading("Build Sniffle Firmware from source (ADVANCED — optional)")
+    warn("You almost certainly do NOT need this. 'Flash Sniffle firmware' uses a")
+    warn("prebuilt CC1352P1F3 hex that Quiver downloads automatically — no build,")
+    warn("no TI SDK. Use this option ONLY to modify Sniffle's source yourself.")
     info("")
-    info("WHY YOU MUST BUILD (do not flash a prebuilt image):")
-    info("  The '-4' board routes 2.4 GHz through the high-power PA port. A")
-    info("  prebuilt Sniffle hex (built for CC1352P1) listens on the wrong RF")
-    info("  front-end and receives NOTHING on 2.4 GHz BLE. Building with")
-    info("  PLATFORM=CC1352P1F3 configures the RF frontend for the -4 routing.")
+    info("Building from source additionally requires the TI SimpleLink SDK, which")
+    info("is login-gated (a free TI account) and cannot be auto-installed — so if")
+    info("you just want to sniff, go back and pick 'Flash Sniffle firmware'.")
+    info("")
+    if not confirm("Continue with an advanced from-source build anyway?", default=False):
+        info("Skipping build — use 'Flash Sniffle firmware' (prebuilt) instead.")
+        return
     info("")
     info("BUILD REQUIREMENTS:")
     info("  • arm-none-eabi-gcc         — ARM cross-compiler")
@@ -867,7 +871,7 @@ def main():
     MENU_OPTIONS = [
         "Device Info",
         "Install Sniffle tooling",
-        "Build Sniffle firmware (CC1352P1F3)",
+        "Build Sniffle from source (advanced — not needed for sniffing)",
         "Flash Sniffle firmware",
         "BLE Capture (Sniffle → pcap)",
         "Crack Pairing (crackle)",

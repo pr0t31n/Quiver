@@ -397,8 +397,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Menu/confirm option feedback: clicked or previously-completed steps go green
-   with a checkmark; siblings dim while the choice is being sent. */
+/* Menu option OUTCOME feedback: green ✓ only when the operation actually
+   succeeded, red ✗ when it emitted an error, amber ⏳ while running. */
 .modal-option-btn.completed,
 .modal-option-btn.completed:hover {
   background: #22a35b !important;
@@ -406,8 +406,17 @@
   color: #fff !important;
 }
 .modal-option-btn.completed::before { content: "\2713  "; font-weight: 700; }
+.modal-option-btn.failed,
+.modal-option-btn.failed:hover {
+  background: #c0392b !important;
+  border-color: #a5281c !important;
+  color: #fff !important;
+}
+.modal-option-btn.failed::before { content: "\2717  "; font-weight: 700; }
+.modal-option-btn.running::before { content: "\23F3  "; }
 .modal-option-btn:disabled { opacity: .5; cursor: not-allowed; }
-.modal-option-btn.completed:disabled { opacity: 1; cursor: default; }
+.modal-option-btn.completed:disabled,
+.modal-option-btn.failed:disabled { opacity: 1; cursor: default; }
 </style>
 {% endblock %}
 
@@ -763,15 +772,28 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
   const cancelBtn  = document.getElementById('modalCancelBtn');
 
   let _currentModalType = 'text';  // track type for echo masking
-  const _menuCompleted = {};       // menu question -> Set(completed option labels)
+  // Per-menu OUTCOME memory: question -> { optionLabel: 'ok' | 'fail' }.
+  const _menuOutcomes = {};
+  // The menu option currently running (clicked, awaiting the menu's return) and
+  // whether the operation emitted any error output while it ran.
+  let _pendingOption = null;   // { title, label }
+  let _pendingError  = false;
 
-  // Mark the clicked option green + disable siblings so the user gets visible
-  // confirmation the click registered, then send after a short beat.
-  function finishOption(btn, answer) {
+  // On click: show a transient "running" state (NOT success). The real outcome
+  // (green ✓ / red ✗) is decided when the menu returns — see openModal(menu).
+  function finishOption(btn, answer, title, label) {
     optionBtns.querySelectorAll('button').forEach(b => { b.disabled = true; });
-    btn.classList.add('completed');
-    setTimeout(() => sendAnswer(answer), 350);
+    btn.classList.remove('completed', 'failed');
+    btn.classList.add('running');
+    if (title !== undefined) { _pendingOption = { title, label }; _pendingError = false; }
+    setTimeout(() => sendAnswer(answer), 250);
   }
+
+  // Any error-level output (err()/exception → stream 'stderr') means the
+  // running operation failed, so the option gets a red ✗ instead of a green ✓.
+  socket.on('script_output', msg => {
+    if (_pendingOption && msg && msg.stream === 'stderr') _pendingError = true;
+  });
 
   function openModal(payload) {
     const ptype    = payload.type || 'text';
@@ -788,18 +810,23 @@ const FIRMWARE_API = `/api/firmware-status/${TOOL_ID}`;
 
     if (ptype === 'menu' && options.length) {
       textInput.style.display = 'none';
-      const done = _menuCompleted[question] || new Set();
+      // The menu re-appearing means the previous operation finished — finalize
+      // its outcome: green ✓ if it succeeded, red ✗ if it emitted any error.
+      if (_pendingOption) {
+        (_menuOutcomes[_pendingOption.title] = _menuOutcomes[_pendingOption.title] || {})
+          [_pendingOption.label] = _pendingError ? 'fail' : 'ok';
+        _pendingOption = null;
+      }
+      const outcomes = _menuOutcomes[question] || {};
       options.forEach((opt, idx) => {
         const btn = document.createElement('button');
         btn.className   = 'btn btn-secondary btn-sm modal-option-btn';
         btn.textContent = `${idx + 1}. ${opt}`;
-        // Steps chosen earlier this session stay marked done when the menu
-        // re-appears, but remain clickable so repeatable actions still work.
-        if (done.has(opt)) btn.classList.add('completed');
-        btn.addEventListener('click', () => {
-          (_menuCompleted[question] = _menuCompleted[question] || new Set()).add(opt);
-          finishOption(btn, String(idx));
-        });
+        // Reflect the real result of the last time this step ran (still
+        // clickable so repeatable actions and retries work).
+        if (outcomes[opt] === 'ok')   btn.classList.add('completed');
+        if (outcomes[opt] === 'fail') btn.classList.add('failed');
+        btn.addEventListener('click', () => finishOption(btn, String(idx), question, opt));
         optionBtns.appendChild(btn);
       });
     } else if (ptype === 'confirm') {

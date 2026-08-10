@@ -1417,22 +1417,38 @@ def flash_ti_uniflash(hex_path, device: str, board_name: str,
         err("dslite returned an error — check the .ccxml matches this device/probe.")
         return False
 
-    # No CLI path available — guide the guaranteed GUI flow.
+    # No CLI path available — explain the ONE blocker (a TI account) and guide.
     if not dslite:
-        warn("TI UniFlash (dslite) not found.")
-        info("  Install it once (free; requires a TI account):")
-        info("    https://www.ti.com/tool/UNIFLASH")
-        info("  After install, dslite is auto-discovered (PATH includes the TI dirs).")
+        warn("This board is flashed with TI UniFlash, which is NOT installed.")
+        info("")
+        info("WHY IT ISN'T AUTOMATIC: these TI LaunchPads flash over the XDS110")
+        info("using 2-pin cJTAG. Only TI's own tool (UniFlash / dslite) drives it")
+        info("correctly — OpenOCD and other open-source flashers cannot. TI puts")
+        info("UniFlash behind a FREE account/login, so it can't be auto-downloaded.")
+        info("This is the one manual, one-time step; after it, flashing is automatic.")
+        info("")
+        info("DO THIS ONCE:")
+        info("  1. Create a free TI account (needed to download UniFlash):")
+        info("       https://www.ti.com/securid/aims/servlet/pages/register.jsp")
+        info("  2. Download + install TI UniFlash (bundles the 'dslite' CLI):")
+        info("       https://www.ti.com/tool/UNIFLASH")
+        info("  3. Re-open this option. Quiver auto-discovers dslite on PATH")
+        info("     (it already searches the standard TI install dirs).")
+        info("")
+        info(f"Then flash — GUI (simplest): launch 'uniflash', it auto-detects the")
+        info(f"  XDS110 + {device}; load  {hex_path}  and click 'Load Image'.")
+        info(f"Or fully-automated CLI: in the GUI, File → Export Configuration to")
+        info(f"  save a {device} .ccxml, then set:")
+        info(f"    export {ccxml_env}=/path/to/{device}.ccxml")
+        info("  — after that Quiver runs dslite for you on every flash.")
     else:
         info(f"dslite found: {dslite}")
-        info(f"  For CLI flashing, export a target .ccxml and set {ccxml_env}:")
-        info(f"    export {ccxml_env}=/path/to/{device}.ccxml   (export from the UniFlash GUI)")
-    info("")
-    info(f"Reliable path — TI UniFlash GUI (auto-detects the XDS110 + {device}):")
-    info("  1. Launch 'uniflash' (or the UniFlash desktop app).")
-    info(f"  2. Select the detected {board_name} / {device} on the XDS110.")
-    info(f"  3. Load image:  {hex_path}")
-    info("  4. Click 'Load Image' to flash.")
+        info(f"  For hands-free CLI flashing, export a {device} .ccxml from the")
+        info(f"  UniFlash GUI (File → Export Configuration) and set:")
+        info(f"    export {ccxml_env}=/path/to/{device}.ccxml")
+        info("  Otherwise use the GUI:")
+        info(f"    launch 'uniflash' → it auto-detects {board_name}/{device} →")
+        info(f"    load  {hex_path}  → 'Load Image'.")
     return None
 
 

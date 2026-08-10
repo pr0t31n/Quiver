@@ -122,20 +122,29 @@ Open **http://localhost:5002** in your browser.
 |--------|-------|------------|
 | **Sonoff ZBDongle-E** | — | `1A86:55D4` / `10C4:EA60` |
 | **LilyGo T-Zigbee v1.2** | Serial UART console | `303A:1001` + others |
-| **Nordic nRF52840** | Serial CDC console | `1915:521F` / `1915:520F` |
+| **Nordic nRF52840** | Serial CDC console | `1915:521F` / `1915:520F` / `1366:1015` (DK J-Link) |
 | **Nordic nRF52833-DK** | — (nRF Sniffer via J-Link) | `1366:1015` / `1366:1051` |
 | **TI CC26X2R1 LaunchPad** | — (Sniffle via XDS110) | `0451:BEF3` |
 | **TI CC1352P-4 LaunchPad** | — (Sniffle, PA-path 2.4 GHz) | `0451:BEF3` |
 | **Bluefruit LE Sniffer** | — (nRF Sniffer v2, BLE 4.0) | `10C4:EA60` |
 | **CC2531** | Serial CDC UART | `0451:16AE` |
 
-Firmware/tooling for the four BLE boards above (Sniffle, the nRF Sniffer for
+Firmware/tooling for the BLE boards above (Sniffle, the nRF Sniffer for
 Bluetooth LE, the Adafruit sniffer host scripts, and crackle) is fetched into
 `firmware/<tool_id>/` by the downloader:
 
 ```bash
-python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,bluefruit_le_sniffer --yes
+python3 firmware/download.py --tools cc1352p4,cc26x2r1,nrf52833_dk,nordic_nrf52840,bluefruit_le_sniffer --yes
 ```
+
+The **Nordic nRF52840-DK** is a full BLE assessment board in its own right: the
+downloader vendors the nRF52840 nRF Sniffer hex (via nrfutil), the Wireshark
+extcap plugin, `crackle`, and — for LE Secure Connections targets — the
+**ButteRFly** MITM firmware plus the **Mirage** host framework into
+`firmware/nordic_nrf52840/`. The device menu flashes the sniffer over J-Link,
+installs the extcap plugin, captures to pcap, and runs `crackle` to recover a
+**legacy pairing PIN/TK** (or drives a Mirage MITM when the target uses Secure
+Connections).
 
 `--yes` runs non-interactively; omit `--tools` to select interactively. Both TI
 boards use a **prebuilt Sniffle hex** (CC26X2R1 → `sniffle_cc2652r1.hex`,
@@ -257,7 +266,8 @@ Each device has a payload library — named scripts stored under `payloads/<devi
 **Zigbee / BLE / LoRa:**
 - `zigbee-channel-survey`, `zigbee-pcap-capture`, `zigbee-replay-attack`, `zigbee-key-extract`, `killerbee-launch`
 - `lora-survey`, `lora-lorawan-sniff`, `lora-replay-test`
-- BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). TI boards flash prebuilt Sniffle hexes via **TI UniFlash** (`dslite`; OpenOCD can't drive the XDS110 cJTAG).
+- BLE connection sniffing (pairing capture → `crackle`): TI CC26X2R1 / CC1352P-4 via **Sniffle** (`sniff_receiver.py`, 2 Mbaud XDS110); Nordic nRF52840-DK, nRF52833-DK & Adafruit Bluefruit LE Sniffer via **nRF Sniffer** (Wireshark extcap). TI boards flash prebuilt Sniffle hexes via **TI UniFlash** (`dslite`; OpenOCD can't drive the XDS110 cJTAG).
+- BLE PIN interception (nRF52840-DK): flash nRF Sniffer over J-Link → capture the pairing → `crackle` recovers the **legacy** Passkey/TK (the 6-digit PIN) and decrypts the link. For **LE Secure Connections** (ECDH — not crackable passively), the board flashes **ButteRFly** firmware and runs an active MITM via **Mirage**.
 
 **Debug Probes:**
 - Bus Pirate 5: `buspirate-uart-sniff`, `buspirate-i2c-scan`, `buspirate-spi-flash-dump`, `buspirate-jtag-idcode`
@@ -435,6 +445,7 @@ quiver/
 │   ├── cc1352p4/       Sniffle checkout + crackle (BLE 5 / Sub-1GHz)
 │   ├── cc26x2r1/       Sniffle checkout + crackle (Bluetooth 5 sniffer)
 │   ├── nrf52833_dk/    nRF Sniffer for BLE hex (nrfutil) + crackle
+│   ├── nordic_nrf52840/  nRF Sniffer hex + extcap + crackle + ButteRFly/Mirage (MITM)
 │   ├── bluefruit_le_sniffer/  Adafruit_BLESniffer_Python + crackle
 │   └── nucleo_f429zi/  STM32CubeF4 (HAL/CMSIS build dep for Click firmware)
 ├── payloads/

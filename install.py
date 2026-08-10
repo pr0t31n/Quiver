@@ -166,21 +166,28 @@ APT_PACKAGES = [
     "git", "python3-pip", "python3-dev",
     "gcc-arm-none-eabi",   # build Sniffle firmware for CC1352P-4 (PLATFORM=CC1352P_4)
     "openocd",             # open-source XDS110 flasher for the TI LaunchPads
+    "tshark", "wireshark-common",  # BLE capture (nRF Sniffer extcap) + pcap tooling
+    "crackle",             # BLE legacy pairing PIN/TK cracker (Kali/Debian package)
+    "libpcap-dev",         # crackle build dependency (git fallback)
 ]
 DNF_PACKAGES = [
     "hackrf", "ubertooth", "stlink", "libusb-devel",
     "git", "python3-pip", "python3-devel",
     "arm-none-eabi-gcc-cs", "arm-none-eabi-newlib",  # CC1352P-4 Sniffle build
     "openocd",
+    "wireshark-cli", "libpcap-devel",  # BLE capture + crackle build (git fallback)
 ]
 ZYPPER_PACKAGES = [
     "hackrf", "ubertooth", "libusb-1_0-devel",
     "git", "python3-pip", "python3-devel",
     "cross-arm-none-eabi-gcc13", "cross-arm-none-eabi-newlib-devel",  # CC1352P-4 build
     "openocd",
+    "wireshark", "libpcap-devel",  # BLE capture + crackle build (git fallback)
 ]
-BREW_PACKAGES  = ["hackrf", "ubertooth", "stlink", "proxmark3", "libusb", "open-ocd"]
-BREW_CASKS     = ["segger-jlink", "gcc-arm-embedded"]  # gcc-arm-embedded = arm-none-eabi-gcc
+BREW_PACKAGES  = ["hackrf", "ubertooth", "stlink", "proxmark3", "libusb", "open-ocd",
+                  "libpcap"]  # libpcap: crackle build dependency
+BREW_CASKS     = ["segger-jlink", "gcc-arm-embedded",  # gcc-arm-embedded = arm-none-eabi-gcc
+                  "wireshark"]  # BLE capture GUI + tshark (nRF Sniffer extcap)
 
 
 def ensure_homebrew():
@@ -266,6 +273,39 @@ def install_git():
     chameleon_dest = "/opt/ChameleonUltra"
     git_clone_or_update("https://github.com/RfidResearchGroup/ChameleonUltra", chameleon_dest)
     info("ChameleonUltra cloned — no build step required.")
+
+    # crackle — BLE legacy pairing PIN/TK cracker. Packaged on Kali/Debian (apt),
+    # but build from source everywhere else so the nRF52840 pairing-crack flow
+    # works regardless of distro. Non-fatal if the toolchain/libpcap is missing.
+    if not shutil.which("crackle"):
+        crackle_dest = "/opt/crackle"
+        git_clone_or_update("https://github.com/mikeryan/crackle", crackle_dest)
+        info("Building crackle …")
+        b = run(["make", "-C", crackle_dest], check=False)
+        built = os.path.join(crackle_dest, "crackle")
+        if getattr(b, "returncode", 1) == 0 and os.path.isfile(built):
+            run(["cp", built, "/usr/local/bin/crackle"], check=False)
+            info("crackle built and installed to /usr/local/bin/crackle")
+        else:
+            warn("crackle build failed (libpcap-dev/toolchain missing?) — "
+                 "repo left at /opt/crackle to build later.")
+    else:
+        info("crackle already present — skipping build.")
+
+    # Mirage — BLE attack/MITM host framework (drives the ButteRFly-flashed
+    # nRF52840 for LE Secure Connections MITM). Best-effort install.
+    if not shutil.which("mirage"):
+        mirage_dest = "/opt/mirage"
+        git_clone_or_update("https://github.com/RCayre/mirage", mirage_dest)
+        if os.path.isfile(os.path.join(mirage_dest, "setup.py")):
+            info("Installing Mirage (python3 setup.py install) …")
+            step(f"{sys.executable} setup.py install  (cwd={mirage_dest})")
+            subprocess.run([sys.executable, "setup.py", "install"],
+                           cwd=mirage_dest, check=False)
+        else:
+            info("Mirage cloned to /opt/mirage — install per its README when needed.")
+    else:
+        info("Mirage already present — skipping install.")
 
 # ---------------------------------------------------------------------------
 # Service files

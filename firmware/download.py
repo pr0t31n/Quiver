@@ -172,10 +172,39 @@ FIRMWARE_SOURCES = {
         "name": "Nordic nRF52840",
         "sources": [
             {
-                "label": "nRF Sniffer for Bluetooth LE",
+                # Vendor the nRF52840 sniffer hex from nrfutil's ble-sniffer share
+                # (current firmware distribution channel), same path nrf52833_dk uses.
+                "type": "nrfutil_sniffer",
+                "label": "nRF Sniffer for Bluetooth LE (nRF52840 hex, via nrfutil ble-sniffer)",
+                "dest_subdir": "ble_sniffer",
+                "hex_glob": "*nrf52840*",
+            },
+            {
+                # The GitHub release additionally carries the Wireshark extcap
+                # plugin (nrf_sniffer_ble.py) + docs bundled in the zip.
+                "label": "nRF Sniffer package (extcap plugin + docs)",
                 "github": ("NordicSemiconductor", "nRF-Sniffer-for-Bluetooth-LE"),
                 "asset_pattern": r"nRF_Sniffer.*\.zip$",
                 "dest_subdir": "ble_sniffer",
+            },
+            {
+                "type": "gitclone",
+                "label": "crackle — BLE legacy pairing / LTK cracker (recovers the PIN/TK)",
+                "giturl": "https://github.com/mikeryan/crackle",
+                "dest_subdir": "crackle",
+                "build": "make",
+            },
+            {
+                "type": "gitclone",
+                "label": "ButteRFly — nRF52840 BLE MITM firmware (for LE Secure Connections)",
+                "giturl": "https://github.com/RCayre/butterfly",
+                "dest_subdir": "butterfly",
+            },
+            {
+                "type": "gitclone",
+                "label": "Mirage — BLE attack/MITM host framework (drives ButteRFly)",
+                "giturl": "https://github.com/RCayre/mirage",
+                "dest_subdir": "mirage",
             },
         ],
     },
