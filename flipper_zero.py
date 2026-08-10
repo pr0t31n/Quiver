@@ -511,7 +511,7 @@ def main():
         "RFID Read",
         "Launch App",
         "Reboot Device",
-        "Firmware Update",
+        "FIRMWARE - Firmware Update",
         "Exit",
     ]
 

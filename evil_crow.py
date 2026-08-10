@@ -872,7 +872,7 @@ def main():
         "Device Info",
         "Check WiFi Connection",
         "Check Firmware Version",
-        "Update Firmware (esptool via USB)",
+        "FIRMWARE - Update Firmware (esptool via USB)",
         "RF Scan (sub-GHz via web API)",
         "Signal Replay (via web API)",
         "Web Interface Instructions",

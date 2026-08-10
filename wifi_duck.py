@@ -465,7 +465,7 @@ def main():
         "Delete File",
         "Memory Stats",
         "Settings",
-        "Firmware Update ESP8266 (OTA)",
+        "FIRMWARE - Firmware Update ESP8266 (OTA)",
         "Exit",
     ]
 

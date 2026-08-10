@@ -403,7 +403,7 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Flash Firmware",
+        "FIRMWARE - Flash Firmware",
         "Write IEEE Address",
         "Start Zigbee Coordinator",
         "Open Network (Permit Join)",

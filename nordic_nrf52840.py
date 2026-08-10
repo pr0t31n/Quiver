@@ -1241,14 +1241,14 @@ def main():
     MENU_OPTIONS = [
         "Device Info",
         "BLE Sniffer Setup (firmware/Wireshark reference)",
-        "Flash nRF Sniffer Firmware to DK (J-Link)",
+        "FIRMWARE - Flash nRF Sniffer Firmware to DK (J-Link)",
         "Wireshark extcap Setup (nRF Sniffer)",
         "BLE Capture (nRF Sniffer -> pcap)",
         "Crack Pairing (crackle — legacy PIN/TK)",
         "BLE MITM (WHAD + ButteRFly — Secure Connections)",
         "Zigbee / Thread NCP Info",
-        "Flash Dongle (nrfutil DFU)",
-        "Flash DK (J-Link — auto backend)",
+        "FIRMWARE - Flash Dongle (nrfutil DFU)",
+        "FIRMWARE - Flash DK (J-Link — auto backend)",
         "Create DFU Package",
         "Exit",
     ]

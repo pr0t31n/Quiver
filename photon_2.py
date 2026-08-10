@@ -800,7 +800,7 @@ def main():
         "Device Info (particle identify)",
         "Check Device OS Version",
         "Update Device OS (OTA)",
-        "Flash Firmware (DFU)",
+        "FIRMWARE - Flash Firmware (DFU)",
         "Serial Monitor",
         "Particle Login",
         "Exit",

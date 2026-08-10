@@ -574,7 +574,7 @@ def main():
         "Enable Auth Logging",
         "View Auth Log",
         "Clone Card",
-        "Firmware Update",
+        "FIRMWARE - Firmware Update",
         "Exit",
     ]
 

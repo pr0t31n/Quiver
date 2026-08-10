@@ -518,8 +518,8 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info (chip_id, hardware info)",
-        "Flash Application Firmware (.bin file)",
-        "Flash MicroPython for ESP32-S3",
+        "FIRMWARE - Flash Application Firmware (.bin file)",
+        "FIRMWARE - Flash MicroPython for ESP32-S3",
         "Upload MicroPython Script (mpremote cp)",
         "WiFi Scan and Deauth Payload Info",
         "LoRa Radio Info and Usage",

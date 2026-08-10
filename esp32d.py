@@ -500,8 +500,8 @@ def main():
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [
         "Device Info (esptool chip_id)",
-        "Flash Application Firmware (merged .bin → 0x10000)",
-        "Flash Full Partition Set (bootloader + partitions + app)",
+        "FIRMWARE - Flash Application Firmware (merged .bin → 0x10000)",
+        "FIRMWARE - Flash Full Partition Set (bootloader + partitions + app)",
         "Flash MicroPython (erase + install)",
         "Upload MicroPython Script (mpremote cp)",
         "Run MicroPython Script (mpremote run)",

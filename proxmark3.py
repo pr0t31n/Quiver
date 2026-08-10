@@ -534,9 +534,9 @@ def op_firmware_update(port: str):
     choice = numbered_menu(
         "Firmware Flash Target",
         [
-            "Flash All (bootrom + fullimage) — recommended",
-            "Flash Bootrom only",
-            "Flash Full Image only",
+            "FIRMWARE - Flash All (bootrom + fullimage) — recommended",
+            "FIRMWARE - Flash Bootrom only",
+            "FIRMWARE - Flash Full Image only",
             "Cancel",
         ],
     )
@@ -636,7 +636,7 @@ def main():
         "EM410x Clone",
         "HID Read",
         "Dictionary Attack",
-        "Firmware Update",
+        "FIRMWARE - Firmware Update",
         "Exit",
     ]
 

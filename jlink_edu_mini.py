@@ -561,7 +561,7 @@ def main():
         "Set Target",
         "Connect to Target",
         "Erase Target Flash",
-        "Flash Firmware",
+        "FIRMWARE - Flash Firmware",
         "Verify Flash",
         "Reset Target",
         "Halt / Resume",

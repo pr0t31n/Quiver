@@ -642,7 +642,7 @@ def main():
     MENU_OPTIONS = [
         "Device Info",
         "Install Sniffle tooling",
-        "Flash Sniffle firmware",
+        "FIRMWARE - Flash Sniffle firmware",
         "BLE Capture (Sniffle -> pcap)",
         "Crack Pairing (crackle)",
         "Wireshark extcap setup",

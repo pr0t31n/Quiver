@@ -414,8 +414,8 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Update Firmware (MCU + FPGA)",
-        "Update MCU Firmware Only",
+        "FIRMWARE - Update Firmware (MCU + FPGA)",
+        "FIRMWARE - Update MCU Firmware Only",
         "Update FPGA Bitstream",
         "Load Custom Bitstream",
         "Install udev Rules (Linux)",

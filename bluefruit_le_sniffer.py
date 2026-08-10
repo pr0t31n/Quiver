@@ -521,7 +521,7 @@ def main():
         "Wireshark extcap setup",
         "BLE Capture",
         "Crack Pairing (crackle)",
-        "Reflash firmware (J-Link + SWD)",
+        "FIRMWARE - Reflash firmware (J-Link + SWD)",
         "Exit",
     ]
 

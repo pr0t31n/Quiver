@@ -498,8 +498,8 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info (MicroPython version, WiFi MAC)",
-        "Flash UF2 Firmware (custom .uf2 file)",
-        "Flash MicroPython for Pico W (download guide + UF2 flash)",
+        "FIRMWARE - Flash UF2 Firmware (custom .uf2 file)",
+        "FIRMWARE - Flash MicroPython for Pico W (download guide + UF2 flash)",
         "WiFi Setup Info (scan networks, connection example)",
         "Upload Payload (wifi-exfil, wireless-sysaudit)",
         "REPL Info (mpremote, minicom, screen)",

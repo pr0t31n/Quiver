@@ -1423,10 +1423,10 @@ def ensure_ti_uniflash(auto: bool = None) -> str:
     d = find_dslite()
     if d:
         return d
-    flavor = get_os_flavor()
-    if flavor == "darwin":
+    flavor = get_os_flavor()   # 'macos' | 'kali' | 'debian' | 'ubuntu' | 'arch' | 'fedora' | 'linux' | 'windows'
+    if flavor == "macos":
         url = UNIFLASH_URL_MAC
-    elif flavor in ("kali", "debian", "ubuntu", "linux"):
+    elif flavor in ("kali", "debian", "ubuntu", "arch", "fedora", "linux"):
         url = UNIFLASH_URL_LINUX
     else:
         warn(f"No automated TI UniFlash installer for OS '{flavor}'. Install manually.")
@@ -1440,7 +1440,7 @@ def ensure_ti_uniflash(auto: bool = None) -> str:
                                     default=True):
         return ""
     try:
-        if flavor == "darwin":
+        if flavor == "macos":
             _install_uniflash_macos(url)
         else:
             _install_uniflash_linux(url)

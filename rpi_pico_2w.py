@@ -665,7 +665,7 @@ def main():
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [
         "Device Info (serial metadata + MicroPython version)",
-        "Flash UF2 Firmware (BOOTSEL mass-storage copy)",
+        "FIRMWARE - Flash UF2 Firmware (BOOTSEL mass-storage copy)",
         "Flash MicroPython for Pico 2W (RP2350-specific build)",
         "WiFi Setup Info + Live Scan (MicroPython CYW43439)",
         "Upload MicroPython Script (mpremote cp)",

@@ -914,8 +914,8 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Flash via J-Link (nrfjprog)",
-        "Flash via DFU (nrfutil)",
+        "FIRMWARE - Flash via J-Link (nrfjprog)",
+        "FIRMWARE - Flash via DFU (nrfutil)",
         "List Firmware Options",
         "Serial Monitor (CDC UART)",
         "Exit",

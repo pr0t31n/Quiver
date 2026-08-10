@@ -389,8 +389,8 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Flash ESP32-C3 Firmware",
-        "Flash Zigbee Coordinator",
+        "FIRMWARE - Flash ESP32-C3 Firmware",
+        "FIRMWARE - Flash Zigbee Coordinator",
         "Zigbee Network Info",
         "Open Zigbee Network (Permit Join)",
         "Serial Console",

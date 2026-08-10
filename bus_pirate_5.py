@@ -405,7 +405,7 @@ def main():
         "Read Voltages (v)",
         "Mode Setup (m)",
         "Power Control (W/w)",
-        "Firmware Update (.uf2)",
+        "FIRMWARE - Firmware Update (.uf2)",
         "Upload Script (.bps)",
         "Exit",
     ]

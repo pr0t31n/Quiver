@@ -679,7 +679,7 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Flash nRF Sniffer firmware",
+        "FIRMWARE - Flash nRF Sniffer firmware",
         "Wireshark extcap setup",
         "BLE Capture",
         "Crack Pairing (crackle)",

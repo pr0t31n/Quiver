@@ -269,7 +269,7 @@ def firmware_update_ssh(ssh: SSHClient) -> bool:
 
     update_method = numbered_menu("Update method:", [
         "apt-get update && apt-get upgrade (Debian package updates)",
-        "Full firmware upgrade via .tar.gz",
+        "FIRMWARE - Full firmware upgrade via .tar.gz",
         "Skip",
     ])
 

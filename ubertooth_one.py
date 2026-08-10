@@ -544,7 +544,7 @@ def main():
         "Classic BT Capture (BR/EDR)",
         "Spectrum Analyzer (2.4 GHz text grid)",
         "Firmware Version (ubertooth-util -V)",
-        "Firmware Update (ubertooth-dfu)",
+        "FIRMWARE - Firmware Update (ubertooth-dfu)",
         "Reset Device (ubertooth-util -r)",
         "Exit",
     ]

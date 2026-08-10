@@ -371,9 +371,9 @@ def op_flash_firmware():
     # ── Firmware selection menu ──
     info("Select the firmware to flash:")
     fw_options = [
-        "Z-Stack Coordinator (Zigbee2MQTT) -- coordinator firmware",
-        "Zigbee Sniffer firmware -- for use with Wireshark",
-        "Custom .hex file -- provide your own firmware path",
+        "FIRMWARE - Z-Stack Coordinator (Zigbee2MQTT) -- coordinator firmware",
+        "FIRMWARE - Zigbee Sniffer firmware -- for use with Wireshark",
+        "FIRMWARE - Custom .hex file -- provide your own firmware path",
         "Cancel",
     ]
     fw_choice = numbered_menu("Firmware Selection", fw_options)
@@ -977,7 +977,7 @@ def main():
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [
         "Device Info (USB details, firmware probe)",
-        "Flash Firmware (requires CC Debugger + debug header)",
+        "FIRMWARE - Flash Firmware (requires CC Debugger + debug header)",
         "Zigbee2MQTT Setup (coordinator mode)",
         "Zigbee Survey / Packet Sniffing (sniffer mode)",
         "Serial Monitor (raw CDC UART output)",

@@ -872,7 +872,7 @@ def main():
         "Device Info",
         "Install Sniffle tooling",
         "Build Sniffle from source (advanced — not needed for sniffing)",
-        "Flash Sniffle firmware",
+        "FIRMWARE - Flash Sniffle firmware",
         "BLE Capture (Sniffle → pcap)",
         "Crack Pairing (crackle)",
         "Wireshark extcap setup",

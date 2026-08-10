@@ -561,8 +561,8 @@ def main():
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [
         "Device Info (serial port metadata + MicroPython version)",
-        "Flash UF2 Firmware (copy .uf2 to RPI-RP2 drive)",
-        "Flash MicroPython (guided download + UF2 flash)",
+        "FIRMWARE - Flash UF2 Firmware (copy .uf2 to RPI-RP2 drive)",
+        "FIRMWARE - Flash MicroPython (guided download + UF2 flash)",
         "Upload Python Script (mpremote cp)",
         "Run Python Script (mpremote run, no storage)",
         "REPL Connection Info (mpremote, minicom, screen, picocom)",

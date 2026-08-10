@@ -444,7 +444,7 @@ def main():
         "Receive IQ (save to file)",
         "Transmit IQ File",
         "Spectrum Sweep (hackrf_sweep)",
-        "Firmware Update (hackrf_spiflash)",
+        "FIRMWARE - Firmware Update (hackrf_spiflash)",
         "Device Info Verbose (all serials)",
         "Exit",
     ]

@@ -376,9 +376,9 @@ def main():
 
     MENU_OPTIONS = [
         "Device Info",
-        "Flash Application Firmware",
-        "Flash Full Partition Set",
-        "Flash MicroPython",
+        "FIRMWARE - Flash Application Firmware",
+        "FIRMWARE - Flash Full Partition Set",
+        "FIRMWARE - Flash MicroPython",
         "Upload MicroPython Script",
         "Run MicroPython Script",
         "MicroPython REPL",

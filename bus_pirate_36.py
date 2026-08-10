@@ -884,7 +884,7 @@ def main():
         "Self-Test (~)",
         "Reset (#)",
         "Enter Bootloader ($)",
-        "Firmware Update (pirate-loader)",
+        "FIRMWARE - Firmware Update (pirate-loader)",
         "Exit",
     ]
 
