@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.21.1"
+VERSION = "1.22.0"
 
 import concurrent.futures
 import ipaddress
@@ -932,6 +932,81 @@ TOOL_GROUPS = {
     },
 }
 
+# ── Interfaces ────────────────────────────────────────────────────────────────
+# The connectivity/protocol interface(s) each tool operates on. Drives the
+# Interface dropdown on the main page, which filters the Tool dropdown. A tool can
+# belong to several interfaces. INTERFACES is ordered for display.
+INTERFACES = {
+    "wifi":      {"label": "Wi-Fi (802.11)",      "icon": "📶"},
+    "bluetooth": {"label": "Bluetooth / BLE",      "icon": "🔵"},
+    "zigbee":    {"label": "Zigbee / 802.15.4",    "icon": "🐝"},
+    "lora":      {"label": "LoRa / LoRaWAN",        "icon": "🛰"},
+    "subghz":    {"label": "Sub-GHz RF",            "icon": "📻"},
+    "sdr":       {"label": "SDR",                   "icon": "🌐"},
+    "uwb":       {"label": "UWB",                   "icon": "📍"},
+    "rfid":      {"label": "RFID / NFC",            "icon": "💳"},
+    "ir":        {"label": "Infrared (IR)",         "icon": "🔦"},
+    "usb_hid":   {"label": "USB HID",               "icon": "⌨"},
+    "usb":       {"label": "USB (device/analysis)", "icon": "🔌"},
+    "network":   {"label": "Ethernet / Network",    "icon": "🖧"},
+    "serial":    {"label": "UART / SPI / I2C",      "icon": "🔗"},
+    "debug":     {"label": "JTAG / SWD",            "icon": "🐞"},
+    "video":     {"label": "HDMI / Video",          "icon": "🖥"},
+    "host":      {"label": "Host / Platform Audit", "icon": "💻"},
+}
+
+# tool_id → list of interface ids (a tool may cover several).
+TOOL_INTERFACES = {
+    "bash_bunny":           ["usb_hid", "network", "usb"],
+    "usb_rubber_ducky":     ["usb_hid"],
+    "rubber_ducky_3":       ["usb_hid"],
+    "badusb":               ["usb_hid"],
+    "omg_cable":            ["usb_hid", "wifi"],
+    "wifi_duck":            ["usb_hid", "wifi"],
+    "key_croc":             ["usb_hid", "network"],
+    "rpi_pico":             ["usb_hid"],
+    "rpi_pico_w":           ["wifi", "bluetooth", "usb_hid"],
+    "rpi_pico_2w":          ["wifi", "bluetooth", "usb_hid"],
+    "wifi_pineapple":       ["wifi"],
+    "wifi_coconut":         ["wifi"],
+    "signal_owl":           ["wifi"],
+    "shark_jack":           ["network"],
+    "packet_squirrel":      ["network"],
+    "lan_turtle":           ["network"],
+    "plunder_bug":          ["network"],
+    "screen_crab":          ["video"],
+    "proxmark3":            ["rfid"],
+    "chameleon_ultra":      ["rfid"],
+    "flipper_zero":         ["subghz", "rfid", "usb_hid", "ir", "bluetooth"],
+    "hackrf_one":           ["sdr", "subghz"],
+    "yardstick_one":        ["subghz"],
+    "evil_crow":            ["subghz"],
+    "ubertooth_one":        ["bluetooth"],
+    "bluefruit_le_sniffer": ["bluetooth"],
+    "nrf52833_dk":          ["bluetooth"],
+    "nordic_nrf52840":      ["bluetooth", "zigbee"],
+    "cc26x2r1":             ["bluetooth", "zigbee"],
+    "cc1352p4":             ["bluetooth", "subghz", "zigbee"],
+    "cc2531":               ["zigbee"],
+    "sonoff_zbdongle_e":    ["zigbee"],
+    "lilygo_tzigbee":       ["zigbee", "wifi", "bluetooth"],
+    "dwm3001cdk":           ["uwb", "bluetooth"],
+    "heltec_lora32_v3":     ["lora", "wifi", "bluetooth"],
+    "lilygo_lora32":        ["lora", "wifi", "bluetooth"],
+    "lilygo_tdeck":         ["lora", "wifi", "bluetooth"],
+    "esp32d":               ["wifi", "bluetooth"],
+    "photon_2":             ["wifi", "bluetooth"],
+    "cynthion":             ["usb"],
+    "greatfet_one":         ["usb", "serial", "debug"],
+    "bugblat_minisniffer2": ["usb"],
+    "bus_pirate_5":         ["serial", "debug"],
+    "bus_pirate_36":        ["serial", "debug"],
+    "nucleo_f429zi":        ["debug", "serial"],
+    "jlink_edu_mini":       ["debug"],
+    "stlink_v2":            ["debug"],
+    "manual_usb_drive":     ["host"],
+}
+
 # ── Payload helpers ────────────────────────────────────────────────────────────
 
 def _load_payloads() -> dict:
@@ -1471,7 +1546,9 @@ def index():
     # unchanged for lookups elsewhere. Category-filter tabs are unaffected.
     tools_sorted = dict(sorted(TOOLS.items(),
                                key=lambda kv: kv[1].get("name", kv[0]).lower()))
-    return render_template("index.html", tools=tools_sorted, payloads=payloads, tool_groups=TOOL_GROUPS)
+    return render_template("index.html", tools=tools_sorted, payloads=payloads,
+                           tool_groups=TOOL_GROUPS, interfaces=INTERFACES,
+                           tool_interfaces=TOOL_INTERFACES)
 
 
 @app.route("/tool/<tool_id>", methods=["GET"])
