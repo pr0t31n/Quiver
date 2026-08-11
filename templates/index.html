@@ -921,32 +921,12 @@ const FW_FUNCS     = {{ firmware_functions | tojson }};    // {qfw_path: {iface:
     window.location.href = '/tool/' + toolId + (payload ? '?payload=' + encodeURIComponent(payload) : '');
   });
 
-  /* ── Periodic page reload ──────────────────────────────────────────────── */
-  // Saves current tool/payload selection to sessionStorage, then reloads the
-  // page every 30 s so device, peer, and network-device detection is refreshed.
-  // Selection is restored immediately after load (see restore block below).
-  setInterval(() => {
-    const tid = toolSel.value;
-    const pid = payloadSel.value;
-    if (tid) sessionStorage.setItem('quiver_tool', tid);
-    else     sessionStorage.removeItem('quiver_tool');
-    if (pid) sessionStorage.setItem('quiver_payload', pid);
-    else     sessionStorage.removeItem('quiver_payload');
-    location.reload();
-  }, 30000);
-
-  // Restore selection saved by a pre-reload snapshot
-  (function restoreSelection() {
-    const tid = sessionStorage.getItem('quiver_tool');
-    const pid = sessionStorage.getItem('quiver_payload');
-    if (!tid) return;
-    toolSel.value = tid;
-    onToolChange();
-    if (pid) {
-      payloadSel.value = pid;
-      payloadSel.dispatchEvent(new Event('change'));
-    }
-  })();
+  /* ── Live device detection (no page reload) ────────────────────────────── */
+  // Device, peer, and network-device detection is pushed in real time over
+  // Socket.IO (device_status_snapshot/update, peer_instances_*, netdev_*), and a
+  // full snapshot is re-requested on every (re)connect below. The old 30 s
+  // location.reload() was redundant — it flashed the screen and wiped the
+  // Interface/Function/Tool selection each cycle — so it has been removed.
 
 
   /* ── Device presence detection ────────────────────────────────────────── */
