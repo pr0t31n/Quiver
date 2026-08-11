@@ -561,13 +561,32 @@
 
 <div class="selector-card">
   <div class="form-row">
+    <!-- Interface selector (filters the Tool dropdown; "All" = unfiltered) -->
+    <div class="form-group">
+      <label for="interfaceSelect">Interface</label>
+      <select id="interfaceSelect">
+        <option value="">— All interfaces —</option>
+        {% for iid, iface in interfaces.items() %}
+        <option value="{{ iid }}">{{ iface.icon }} {{ iface.label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <!-- Function selector (interface-specific; populated by JS; "All" = unfiltered) -->
+    <div class="form-group">
+      <label for="functionSelect">Function</label>
+      <select id="functionSelect" disabled>
+        <option value="">— All functions —</option>
+      </select>
+    </div>
+
     <!-- Tool selector -->
     <div class="form-group">
       <label for="toolSelect">Tool</label>
       <select id="toolSelect">
         <option value="">— Select a tool —</option>
         {% for tid, tool in tools.items() %}
-        <option value="{{ tid }}">{{ tool.icon }} {{ tool.name }}</option>
+        <option value="{{ tid }}" data-ifaces="{{ tool_interfaces.get(tid, []) | join(' ') }}">{{ tool.icon }} {{ tool.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -637,6 +656,9 @@
 <!-- Payload data injected for JS -->
 <script>
 const ALL_PAYLOADS = {{ payloads | tojson }};
+const IFACE_FUNCS  = {{ interface_functions | tojson }};   // {iface: [{id,label,requires:[...]}]}
+const TOOL_FUNCS   = {{ tool_functions | tojson }};        // {tool: {iface: [caps]}}
+const FW_FUNCS     = {{ firmware_functions | tojson }};    // {qfw_path: {iface: [funcs]}}
 </script>
 {% endblock %}
 
@@ -666,6 +688,22 @@ const ALL_PAYLOADS = {{ payloads | tojson }};
     payloadDesc.classList.remove('visible');
   }
 
+  // A payload matches the active Function filter when its firmware coverage is a
+  // SUPERSET of the filter's requirement (Rx/Tx firmware matches an "Rx" filter).
+  // Payloads with no coverage entry (generic loaders, attack payloads) always show;
+  // firmwares with coverage but not for the selected interface are hidden.
+  function payloadMatchesFunction(path) {
+    const iface = document.getElementById('interfaceSelect').value;
+    const func  = document.getElementById('functionSelect').value;
+    if (!iface || !func) return true;
+    const cov = FW_FUNCS[path];
+    if (!cov) return true;
+    const def = (IFACE_FUNCS[iface] || []).find(f => f.id === func);
+    const req = def ? def.requires : [];
+    const have = cov[iface] || [];
+    return req.every(r => have.includes(r));
+  }
+
   function populatePayloads(toolId) {
     payloadSel.innerHTML = '';
     clearPayloadDesc();
@@ -678,7 +716,7 @@ const ALL_PAYLOADS = {{ payloads | tojson }};
     const noOpt = document.createElement('option');
     noOpt.value = ''; noOpt.textContent = '— No payload (run bare script) —';
     payloadSel.appendChild(noOpt);
-    list.forEach(p => {
+    list.filter(p => payloadMatchesFunction(p.path)).forEach(p => {
       const opt = document.createElement('option');
       opt.value = p.path;
       opt.textContent = p.name;
@@ -710,6 +748,72 @@ const ALL_PAYLOADS = {{ payloads | tojson }};
   }
 
   toolSel.addEventListener('change', onToolChange);
+
+  // ── Interface → Function → Tool cascade filter ─────────────────────────────
+  // Interface "All" leaves everything unfiltered. Choosing an interface populates
+  // the interface-specific Function dropdown (Rx/Tx, Read/Write, …) and narrows the
+  // Tool list; choosing a Function narrows it further. The Tool <select> is rebuilt
+  // from a snapshot so it stays alphabetical; the current selection is preserved
+  // when it still matches and reset (clearing dependent UI) when it doesn't.
+  const ifaceSel = document.getElementById('interfaceSelect');
+  const funcSel  = document.getElementById('functionSelect');
+  const _toolOptMaster = Array.from(toolSel.options)
+    .filter(o => o.value)
+    .map(o => ({ value: o.value, html: o.innerHTML }));
+
+  function toolMatches(toolId) {
+    const iface = ifaceSel.value, func = funcSel.value;
+    if (!iface) return true;                          // All interfaces
+    const caps = TOOL_FUNCS[toolId] || {};
+    if (!(iface in caps)) return false;               // must cover the interface
+    if (!func) return true;                           // All functions
+    const def = (IFACE_FUNCS[iface] || []).find(f => f.id === func);
+    const req = def ? def.requires : [];
+    const have = caps[iface] || [];
+    return req.every(r => have.includes(r));           // combined options need all
+  }
+
+  function populateFunctions() {
+    const iface = ifaceSel.value;
+    funcSel.innerHTML = '<option value="">— All functions —</option>';
+    const funcs = iface ? (IFACE_FUNCS[iface] || []) : [];
+    funcs.forEach(f => {
+      const o = document.createElement('option');
+      o.value = f.id; o.textContent = f.label;
+      funcSel.appendChild(o);
+    });
+    funcSel.disabled = (funcs.length === 0);           // disabled under "All interfaces"
+  }
+
+  function rebuildToolDropdown() {
+    const cur = toolSel.value;
+    toolSel.length = 1;                                // keep the placeholder option
+    let curStillVisible = false;
+    _toolOptMaster.forEach(o => {
+      if (toolMatches(o.value)) {
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.innerHTML = o.html;
+        toolSel.appendChild(opt);
+        if (o.value === cur) curStillVisible = true;
+      }
+    });
+    if (cur && curStillVisible) {
+      toolSel.value = cur;
+    } else if (cur) {
+      toolSel.value = '';
+      onToolChange();
+    }
+  }
+
+  ifaceSel.addEventListener('change', () => {
+    populateFunctions(); rebuildToolDropdown();
+    if (toolSel.value) populatePayloads(toolSel.value);   // re-filter payloads for the kept tool
+  });
+  funcSel.addEventListener('change', () => {
+    rebuildToolDropdown();
+    if (toolSel.value) populatePayloads(toolSel.value);
+  });
+
   toggleBtn.addEventListener('click', () => addSection.classList.toggle('open'));
 
   document.querySelectorAll('.tool-card').forEach(card => {

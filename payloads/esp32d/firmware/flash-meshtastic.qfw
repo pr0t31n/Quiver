@@ -1,0 +1,1 @@
+{"type":"firmware_flash","board":"ESP32-D","firmware":"Meshtastic","label":"Flash Meshtastic (requires LoRa radio + QUIVER_MESHTASTIC_VARIANT)"}

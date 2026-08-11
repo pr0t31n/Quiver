@@ -871,6 +871,12 @@
       "description": "Auto-flashes the Nordic 'nRF Sniffer for Bluetooth LE' firmware to the nRF52840-DK over the onboard J-Link (SWD). Runs the full flow with NO interactive menu: shows device info, PREPARES (fetches the sniffer hex via nrfutil ble-sniffer, provisions a J-Link flash backend), prints a summary, and only then shows a single 'Are you sure?' confirmation before writing. Turns the DK into a passive BLE packet sniffer for Wireshark.",
       "path": "payloads/nordic_nrf52840/firmware/flash-nrf-sniffer.qfw",
       "added": "2026-08-10T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ButteRFly (BLE MITM)",
+      "description": "Flashes the whad-team ButteRFly firmware to the nRF52840-DK over J-Link/SWD, adding BLE Rx/Tx (active MITM via the WHAD host tools) to a board that otherwise runs the nRF Sniffer (BLE Rx only). Auto-downloads butterfly.hex from whad-team/butterfly; aborts before the confirm if unavailable.",
+      "path": "payloads/nordic_nrf52840/firmware/flash-butterfly.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "lilygo_tdeck": [
@@ -1075,6 +1081,12 @@
       "description": "Auto-flash the prebuilt Sniffle BLE-sniffer firmware to the CC26X2R1 over the XDS110. Runs with NO interactive menu: shows device info, then prepares everything (downloads the Sniffle hex, auto-installs TI UniFlash/dslite, generates the target config), then a summary and a single 'Are you sure?' confirmation before the flash write.",
       "path": "payloads/cc26x2r1/firmware/flash-sniffle.qfw",
       "added": "2026-08-10T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Z-Stack Zigbee coordinator",
+      "description": "Flashes the Z-Stack Zigbee COORDINATOR firmware (Koenkk/Z-Stack-firmware, CC2652R) to the CC26X2R1 over the XDS110 (dslite). Adds Zigbee Rx/Tx to a board that otherwise only runs Sniffle (BLE Rx). Auto-downloads the coordinator .hex (git-trees API), or uses an operator-supplied hex; aborts before the confirm if neither is available.",
+      "path": "payloads/cc26x2r1/firmware/flash-zstack-coordinator.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "cc1352p4": [
@@ -1083,6 +1095,12 @@
       "description": "Auto-flash the prebuilt Sniffle BLE-sniffer firmware to the CC1352P-4 over the XDS110. Runs with NO interactive menu: device info, then prepares everything (downloads the Sniffle hex, auto-installs TI UniFlash/dslite, generates the target config), then a summary + single 'Are you sure?' before the flash write.",
       "path": "payloads/cc1352p4/firmware/flash-sniffle.qfw",
       "added": "2026-08-10T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Z-Stack Zigbee coordinator",
+      "description": "Flashes the Z-Stack Zigbee COORDINATOR firmware (Koenkk/Z-Stack-firmware, CC1352P) to the CC1352P-4 over the XDS110 (dslite). Adds Zigbee Rx/Tx alongside the Sniffle (BLE Rx) option. Auto-downloads the coordinator .hex or uses an operator-supplied hex; aborts before the confirm if neither is available.",
+      "path": "payloads/cc1352p4/firmware/flash-zstack-coordinator.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "nrf52833_dk": [
@@ -1206,6 +1224,12 @@
       "name": "FIRMWARE - Flash Meshtastic (tlora-v2-1-1.6)",
       "description": "Meshtastic from meshtastic/firmware (tlora-v2-1-1.6 variant for LoRa32 v1.6.1). prepare_fn downloads the variant .bin; flash erases then writes the factory image at 0x0 (esptool, ESP32).",
       "path": "payloads/lilygo_lora32/firmware/flash-meshtastic.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ESP32 Marauder",
+      "description": "Flashes ESP32 Marauder (justcallmekoko/ESP32Marauder) to the LilyGo LoRa32's ESP32, adding Wi-Fi/BLE Rx/Tx (deauth, beacon spam, PMKID, BLE spam) alongside the LoRa Meshtastic option. Downloads the generic ESP32 build via esptool; aborts before the confirm if the release asset can't be resolved.",
+      "path": "payloads/lilygo_lora32/firmware/flash-marauder.qfw",
       "added": "2026-08-11T00:00:00Z"
     }
   ],

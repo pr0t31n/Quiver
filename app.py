@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.22.0"
+VERSION = "1.25.0"
 
 import concurrent.futures
 import ipaddress
@@ -980,7 +980,7 @@ TOOL_INTERFACES = {
     "flipper_zero":         ["subghz", "rfid", "usb_hid", "ir", "bluetooth"],
     "hackrf_one":           ["sdr", "subghz"],
     "yardstick_one":        ["subghz"],
-    "evil_crow":            ["subghz"],
+    "evil_crow":            ["subghz", "wifi", "bluetooth"],
     "ubertooth_one":        ["bluetooth"],
     "bluefruit_le_sniffer": ["bluetooth"],
     "nrf52833_dk":          ["bluetooth"],
@@ -1005,6 +1005,174 @@ TOOL_INTERFACES = {
     "jlink_edu_mini":       ["debug"],
     "stlink_v2":            ["debug"],
     "manual_usb_drive":     ["host"],
+}
+
+# ── Functions (interface-specific) ────────────────────────────────────────────
+# Each interface exposes its own set of function filters. A function has an id, a
+# display label, and `requires`: the atomic capabilities a tool must have (for
+# that interface) to match. The combined options (Rx/Tx, Read/Write, …) require
+# ALL their components. Drives the Function dropdown, which is repopulated when the
+# Interface changes and further narrows the Tool dropdown.
+_RADIO_FUNCS = [
+    {"id": "rx",   "label": "Rx",    "requires": ["rx"]},
+    {"id": "tx",   "label": "Tx",    "requires": ["tx"]},
+    {"id": "rxtx", "label": "Rx/Tx", "requires": ["rx", "tx"]},
+]
+INTERFACE_FUNCTIONS = {
+    "wifi":      _RADIO_FUNCS,
+    "bluetooth": _RADIO_FUNCS,
+    "zigbee":    _RADIO_FUNCS,
+    "lora":      _RADIO_FUNCS,
+    "subghz":    _RADIO_FUNCS,
+    "sdr":       _RADIO_FUNCS,
+    "uwb":       _RADIO_FUNCS,
+    "ir":        _RADIO_FUNCS,
+    "rfid": [
+        {"id": "read",      "label": "Read",       "requires": ["read"]},
+        {"id": "write",     "label": "Write",      "requires": ["write"]},
+        {"id": "readwrite", "label": "Read/Write", "requires": ["read", "write"]},
+        {"id": "emulate",   "label": "Emulate",    "requires": ["emulate"]},
+    ],
+    "usb_hid": [
+        {"id": "inject",         "label": "Inject",           "requires": ["inject"]},
+        {"id": "capture",        "label": "Capture",          "requires": ["capture"]},
+        {"id": "inject_capture", "label": "Inject + Capture", "requires": ["inject", "capture"]},
+    ],
+    "usb": [
+        {"id": "sniff",         "label": "Sniff",           "requires": ["sniff"]},
+        {"id": "emulate",       "label": "Emulate",         "requires": ["emulate"]},
+        {"id": "sniff_emulate", "label": "Sniff + Emulate", "requires": ["sniff", "emulate"]},
+    ],
+    "network": [
+        {"id": "capture",        "label": "Capture",        "requires": ["capture"]},
+        {"id": "inject",         "label": "Inject / MITM",  "requires": ["inject"]},
+        {"id": "capture_inject", "label": "Capture + Inject","requires": ["capture", "inject"]},
+    ],
+    "serial": [
+        {"id": "read",      "label": "Read",       "requires": ["read"]},
+        {"id": "write",     "label": "Write",      "requires": ["write"]},
+        {"id": "readwrite", "label": "Read/Write", "requires": ["read", "write"]},
+    ],
+    "debug": [
+        {"id": "read",      "label": "Read / Dump",  "requires": ["read"]},
+        {"id": "write",     "label": "Write / Flash", "requires": ["write"]},
+        {"id": "readwrite", "label": "Read/Write",   "requires": ["read", "write"]},
+    ],
+    "video": [
+        {"id": "capture", "label": "Capture", "requires": ["capture"]},
+    ],
+    "host": [
+        {"id": "audit", "label": "Audit", "requires": ["audit"]},
+    ],
+}
+
+# tool_id → { interface_id → [atomic capabilities the tool has ON that interface] }.
+# Interface keys here MUST match TOOL_INTERFACES (validated at import). Capabilities
+# reflect what the HARDWARE can do, so the filter surfaces the right gear for a task.
+TOOL_FUNCTIONS = {
+    "bash_bunny":           {"usb_hid": ["inject"], "network": ["capture", "inject"], "usb": ["emulate"]},
+    "usb_rubber_ducky":     {"usb_hid": ["inject"]},
+    "rubber_ducky_3":       {"usb_hid": ["inject"]},
+    "badusb":               {"usb_hid": ["inject"]},
+    "omg_cable":            {"usb_hid": ["inject"], "wifi": ["rx", "tx"]},
+    "wifi_duck":            {"usb_hid": ["inject"], "wifi": ["rx", "tx"]},
+    "key_croc":             {"usb_hid": ["capture", "inject"], "network": ["capture"]},
+    "rpi_pico":             {"usb_hid": ["inject"]},
+    "rpi_pico_w":           {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"], "usb_hid": ["inject"]},
+    "rpi_pico_2w":          {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"], "usb_hid": ["inject"]},
+    "wifi_pineapple":       {"wifi": ["rx", "tx"]},
+    "wifi_coconut":         {"wifi": ["rx"]},
+    "signal_owl":           {"wifi": ["rx"]},
+    "shark_jack":           {"network": ["capture", "inject"]},
+    "packet_squirrel":      {"network": ["capture", "inject"]},
+    "lan_turtle":           {"network": ["capture", "inject"]},
+    "plunder_bug":          {"network": ["capture"]},
+    "screen_crab":          {"video": ["capture"]},
+    "proxmark3":            {"rfid": ["read", "write", "emulate"]},
+    "chameleon_ultra":      {"rfid": ["read", "write", "emulate"]},
+    "flipper_zero":         {"subghz": ["rx", "tx"], "rfid": ["read", "write", "emulate"], "usb_hid": ["inject"], "ir": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "hackrf_one":           {"sdr": ["rx", "tx"], "subghz": ["rx", "tx"]},
+    "yardstick_one":        {"subghz": ["rx", "tx"]},
+    "evil_crow":            {"subghz": ["rx", "tx"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "ubertooth_one":        {"bluetooth": ["rx"]},
+    "bluefruit_le_sniffer": {"bluetooth": ["rx"]},
+    "nrf52833_dk":          {"bluetooth": ["rx", "tx"]},
+    "nordic_nrf52840":      {"bluetooth": ["rx", "tx"], "zigbee": ["rx", "tx"]},
+    "cc26x2r1":             {"bluetooth": ["rx", "tx"], "zigbee": ["rx", "tx"]},
+    "cc1352p4":             {"bluetooth": ["rx", "tx"], "subghz": ["rx", "tx"], "zigbee": ["rx", "tx"]},
+    "cc2531":               {"zigbee": ["rx", "tx"]},
+    "sonoff_zbdongle_e":    {"zigbee": ["rx", "tx"]},
+    "lilygo_tzigbee":       {"zigbee": ["rx", "tx"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "dwm3001cdk":           {"uwb": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "heltec_lora32_v3":     {"lora": ["rx", "tx"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "lilygo_lora32":        {"lora": ["rx", "tx"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "lilygo_tdeck":         {"lora": ["rx", "tx"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "esp32d":               {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "photon_2":             {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "cynthion":             {"usb": ["sniff", "emulate"]},
+    "greatfet_one":         {"usb": ["emulate"], "serial": ["read", "write"], "debug": ["read", "write"]},
+    "bugblat_minisniffer2": {"usb": ["sniff"]},
+    "bus_pirate_5":         {"serial": ["read", "write"], "debug": ["read", "write"]},
+    "bus_pirate_36":        {"serial": ["read", "write"], "debug": ["read", "write"]},
+    "nucleo_f429zi":        {"debug": ["read", "write"], "serial": ["read", "write"]},
+    "jlink_edu_mini":       {"debug": ["read", "write"]},
+    "stlink_v2":            {"debug": ["read", "write"]},
+    "manual_usb_drive":     {"host": ["audit"]},
+}
+
+# ── Firmware function coverage ────────────────────────────────────────────────
+# What a specific firmware PAYLOAD actually enables — which may be a SUBSET of the
+# hardware's capability (a sniffer firmware only does Rx even on Rx/Tx silicon).
+# Keyed by the .qfw path. Selecting a Function filters the Payload dropdown to the
+# firmwares whose coverage is a SUPERSET of the filter (an Rx/Tx firmware matches an
+# "Rx" filter). Firmwares with NO entry here (generic app/MicroPython/debug-flash
+# loaders) are treated as function-agnostic and always shown.
+_FLIPPER_FULL = {"subghz": ["rx", "tx"], "rfid": ["read", "write", "emulate"],
+                 "usb_hid": ["inject"], "ir": ["rx", "tx"], "bluetooth": ["rx", "tx"]}
+FIRMWARE_FUNCTIONS = {
+    # BLE sniffers — Rx only (subset of Rx/Tx silicon)
+    "payloads/cc26x2r1/firmware/flash-sniffle.qfw":            {"bluetooth": ["rx"]},
+    "payloads/cc1352p4/firmware/flash-sniffle.qfw":            {"bluetooth": ["rx"]},
+    "payloads/nordic_nrf52840/firmware/flash-nrf-sniffer.qfw": {"bluetooth": ["rx"]},
+    "payloads/nrf52833_dk/firmware/flash-nrf-sniffer.qfw":     {"bluetooth": ["rx"]},
+    "payloads/bluefruit_le_sniffer/firmware/reflash-firmware.qfw": {"bluetooth": ["rx"]},
+    "payloads/ubertooth_one/firmware/flash-ubertooth.qfw":     {"bluetooth": ["rx"]},
+    # Zigbee — sniffer (Rx) vs coordinator/router (Rx/Tx)
+    "payloads/cc2531/firmware/flash-sniffer.qfw":              {"zigbee": ["rx"]},
+    "payloads/cc2531/firmware/flash-coordinator.qfw":         {"zigbee": ["rx", "tx"]},
+    "payloads/sonoff_zbdongle_e/firmware/flash-coordinator.qfw": {"zigbee": ["rx", "tx"]},
+    "payloads/sonoff_zbdongle_e/firmware/flash-router.qfw":   {"zigbee": ["rx", "tx"]},
+    "payloads/lilygo_tzigbee/firmware/flash-zigbee-coordinator.qfw": {"zigbee": ["rx", "tx"]},
+    # Sub-GHz / SDR — Rx/Tx
+    "payloads/yardstick_one/firmware/flash-rfcat.qfw":         {"subghz": ["rx", "tx"]},
+    "payloads/evil_crow/firmware/flash-firmware.qfw":         {"subghz": ["rx", "tx"]},
+    "payloads/hackrf_one/firmware/flash-stock.qfw":           {"sdr": ["rx", "tx"], "subghz": ["rx", "tx"]},
+    # Marauder — Wi-Fi + BLE Rx/Tx
+    "payloads/esp32d/firmware/flash-marauder.qfw":            {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "payloads/evil_crow/firmware/flash-marauder.qfw":        {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "payloads/heltec_lora32_v3/firmware/flash-marauder.qfw": {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "payloads/lilygo_tdeck/firmware/flash-marauder.qfw":     {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    # Meshtastic — LoRa Rx/Tx
+    "payloads/heltec_lora32_v3/firmware/flash-meshtastic.qfw": {"lora": ["rx", "tx"]},
+    "payloads/lilygo_lora32/firmware/flash-meshtastic.qfw":  {"lora": ["rx", "tx"]},
+    "payloads/lilygo_tdeck/firmware/flash-meshtastic.qfw":   {"lora": ["rx", "tx"]},
+    # RFID — read/write/emulate
+    "payloads/chameleon_ultra/firmware/flash-firmware.qfw":  {"rfid": ["read", "write", "emulate"]},
+    "payloads/proxmark3/firmware/flash-all.qfw":             {"rfid": ["read", "write", "emulate"]},
+    "payloads/proxmark3/firmware/flash-fullimage.qfw":       {"rfid": ["read", "write", "emulate"]},
+    # UWB — Rx/Tx (ranging); Qorvo Nearby Interaction pairs over BLE too
+    "payloads/dwm3001cdk/firmware/flash-dfu.qfw":            {"uwb": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "payloads/dwm3001cdk/firmware/flash-jlink.qfw":          {"uwb": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    # Part-2 additions: firmware that fills a hardware capability gap
+    "payloads/cc26x2r1/firmware/flash-zstack-coordinator.qfw": {"zigbee": ["rx", "tx"]},
+    "payloads/cc1352p4/firmware/flash-zstack-coordinator.qfw": {"zigbee": ["rx", "tx"]},
+    "payloads/lilygo_lora32/firmware/flash-marauder.qfw":      {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    "payloads/nordic_nrf52840/firmware/flash-butterfly.qfw":   {"bluetooth": ["rx", "tx"]},
+    # Flipper CFWs — full capability
+    "payloads/flipper_zero/firmware/official.qfw":    _FLIPPER_FULL,
+    "payloads/flipper_zero/firmware/unleashed.qfw":   _FLIPPER_FULL,
+    "payloads/flipper_zero/firmware/roguemaster.qfw": _FLIPPER_FULL,
+    "payloads/flipper_zero/firmware/momentum.qfw":    _FLIPPER_FULL,
 }
 
 # ── Payload helpers ────────────────────────────────────────────────────────────
@@ -1548,7 +1716,10 @@ def index():
                                key=lambda kv: kv[1].get("name", kv[0]).lower()))
     return render_template("index.html", tools=tools_sorted, payloads=payloads,
                            tool_groups=TOOL_GROUPS, interfaces=INTERFACES,
-                           tool_interfaces=TOOL_INTERFACES)
+                           tool_interfaces=TOOL_INTERFACES,
+                           interface_functions=INTERFACE_FUNCTIONS,
+                           tool_functions=TOOL_FUNCTIONS,
+                           firmware_functions=FIRMWARE_FUNCTIONS)
 
 
 @app.route("/tool/<tool_id>", methods=["GET"])

@@ -562,10 +562,59 @@ def _run_meshtastic_payload(fw, port):
                        f"Port     : {port}"])
 
 
+MARAUDER_OWNER = "justcallmekoko"
+MARAUDER_REPO  = "ESP32Marauder"
+
+
+def _run_marauder_payload(fw, port):
+    """ESP32 Marauder (Wi-Fi/BLE) on the LilyGo LoRa32's ESP32. Generic ESP32 build."""
+    state = {}
+    dest = get_firmware_dir("lilygo_lora32") / "marauder"
+
+    def prep():
+        binf = _download_release_asset(
+            MARAUDER_OWNER, MARAUDER_REPO,
+            [r"esp32_marauder.*generic.*\.bin", r"esp32_marauder_v\d[^/]*\.bin",
+             r"esp32_marauder[^/]*\.bin"], dest, "ESP32 Marauder firmware")
+        if not binf:
+            err("  Could not fetch an ESP32 Marauder firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MARAUDER_OWNER}/{MARAUDER_REPO}/releases or drop the board .bin into {dest}.")
+            return False
+        blf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"bootloader[^/]*\.bin"], dest, "bootloader")
+        ptf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"partitions[^/]*\.bin"], dest, "partitions")
+        b0f = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"boot_app0[^/]*\.bin"], dest, "boot_app0")
+        if blf and ptf and b0f:
+            state["files"] = [("0x1000", str(blf)), ("0x8000", str(ptf)),
+                              ("0xe000", str(b0f)), ("0x10000", str(binf))]
+            ok("  Full Marauder image set ready (bootloader+partitions+boot_app0+firmware).")
+        else:
+            state["files"] = [("0x10000", str(binf))]
+            warn("  Only the Marauder firmware image was available; flashing app slot at 0x10000.")
+            warn("  A first-time/clean install may also need bootloader/partitions/boot_app0 (ESP32Marauder wiki).")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                "write_flash", "--flash_mode", "dio", "--flash_size", "detect"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _esptool(args, timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32 Marauder"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}", "SD card  : REMOVE before flashing",
+                       f"Firmware : ESP32 Marauder ({MARAUDER_OWNER}/{MARAUDER_REPO})",
+                       f"Port     : {port}"])
+
+
 def _dispatch_firmware_payload(fw, port):
     name = fw.get("firmware", "")
     if name == "Meshtastic":
         _run_meshtastic_payload(fw, port)
+    elif name == "Marauder":
+        _run_marauder_payload(fw, port)
     elif name == "Application":
         _run_app_payload(fw, port)
     elif name == "PartitionSet":

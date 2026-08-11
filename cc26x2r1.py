@@ -403,6 +403,70 @@ def _autoflash_sniffle(port: str):
     flash_ti_uniflash(Path(hex_file), device="CC2652R1F", board_name="CC26X2R1")
 
 
+def _fetch_zstack_coordinator(devpat: str):
+    """Obtain a Z-Stack coordinator .hex (Zigbee Rx/Tx). Operator-supplied image in
+    firmware/cc26x2r1/zstack/ wins; otherwise best-effort auto-download from
+    Koenkk/Z-Stack-firmware (git-trees API → the newest coordinator hex matching
+    *devpat*). Returns a Path or None."""
+    d = get_firmware_dir("cc26x2r1") / "zstack"
+    d.mkdir(parents=True, exist_ok=True)
+    for pat in (f"*{devpat}*oordinator*.hex", "*oordinator*.hex", "*.hex"):
+        hits = sorted(d.glob(pat))
+        if hits:
+            return hits[-1]
+    try:
+        import json as _json, urllib.request as _u
+        from common import download_firmware
+        req = _u.Request("https://api.github.com/repos/Koenkk/Z-Stack-firmware/"
+                         "git/trees/master?recursive=1",
+                         headers={"User-Agent": "Quiver"})
+        tree = _json.loads(_u.urlopen(req, timeout=30).read()).get("tree", [])
+        cands = sorted(t["path"] for t in tree if t.get("path", "").endswith(".hex")
+                       and "coordinator" in t["path"].lower()
+                       and devpat.lower() in t["path"].lower())
+        if cands:
+            url = "https://raw.githubusercontent.com/Koenkk/Z-Stack-firmware/master/" + cands[-1]
+            dest = d / cands[-1].split("/")[-1]
+            if download_firmware(url, dest, "Z-Stack coordinator"):
+                return dest
+    except Exception as e:  # noqa: BLE001 — network/asset lookup best-effort
+        warn(f"Z-Stack coordinator auto-download failed: {e}")
+    return None
+
+
+def _prep_zstack_flash(port: str) -> bool:
+    """Firmware-payload PREPARE for the Z-Stack Zigbee coordinator (Rx/Tx)."""
+    ready = True
+    if not verify_xds110_identity("cc26x2r1"):
+        err("  Board identity not confirmed as CC26X2R1 — resolve before flashing.")
+        ready = False
+    hexf = _fetch_zstack_coordinator("CC2652R")
+    if hexf and Path(hexf).exists():
+        ok(f"  Z-Stack coordinator firmware ready: {hexf}")
+    else:
+        err("  Z-Stack coordinator hex unavailable (auto-download failed).")
+        info("  Drop a CC2652R coordinator .hex from Koenkk/Z-Stack-firmware into:")
+        info(f"    {get_firmware_dir('cc26x2r1') / 'zstack'}")
+        ready = False
+    dslite = find_dslite() or ensure_ti_uniflash(auto=True)
+    if dslite:
+        ok(f"  Flasher ready (dslite): {dslite}")
+        ensure_ti_ccxml("CC2652R1F")
+    else:
+        err("  TI UniFlash (dslite) could not be installed — see output above.")
+        ready = False
+    return ready
+
+
+def _autoflash_zstack(port: str):
+    """Firmware-payload FLASH for the Z-Stack coordinator."""
+    hexf = _fetch_zstack_coordinator("CC2652R")
+    if not hexf or not Path(hexf).exists():
+        err("Z-Stack coordinator hex missing at flash time — aborting.")
+        return
+    flash_ti_uniflash(Path(hexf), device="CC2652R1F", board_name="CC26X2R1")
+
+
 def op_flash_firmware(port: str):
     heading("Flash Sniffle Firmware")
 
@@ -680,18 +744,32 @@ def main():
     # Firmware payload selected on the main page → auto-flash (no menu).
     fw = selected_firmware_payload()
     if fw:
-        run_firmware_payload(
-            fw.get("label", "Flash Sniffle firmware"),
-            info_fn=lambda: op_device_info(port),
-            prepare_fn=lambda: _prep_sniffle_flash(port),
-            flash_fn=lambda: _autoflash_sniffle(port),
-            summary_lines=[
-                f"Board    : {TOOL_NAME}",
-                f"Firmware : {fw.get('firmware', 'Sniffle')} (prebuilt hex)",
-                f"Port     : {port}",
-                "Flasher  : TI UniFlash / dslite over the XDS110 cJTAG",
-            ],
-        )
+        if "zstack" in fw.get("firmware", "").lower() or "coordinator" in fw.get("firmware", "").lower():
+            run_firmware_payload(
+                fw.get("label", "Flash Z-Stack coordinator"),
+                info_fn=lambda: op_device_info(port),
+                prepare_fn=lambda: _prep_zstack_flash(port),
+                flash_fn=lambda: _autoflash_zstack(port),
+                summary_lines=[
+                    f"Board    : {TOOL_NAME}",
+                    "Firmware : Z-Stack Zigbee coordinator (Koenkk) — Zigbee Rx/Tx",
+                    f"Port     : {port}",
+                    "Flasher  : TI UniFlash / dslite over the XDS110 cJTAG",
+                ],
+            )
+        else:
+            run_firmware_payload(
+                fw.get("label", "Flash Sniffle firmware"),
+                info_fn=lambda: op_device_info(port),
+                prepare_fn=lambda: _prep_sniffle_flash(port),
+                flash_fn=lambda: _autoflash_sniffle(port),
+                summary_lines=[
+                    f"Board    : {TOOL_NAME}",
+                    f"Firmware : {fw.get('firmware', 'Sniffle')} (prebuilt hex)",
+                    f"Port     : {port}",
+                    "Flasher  : TI UniFlash / dslite over the XDS110 cJTAG",
+                ],
+            )
         return
 
     MENU_OPTIONS = [

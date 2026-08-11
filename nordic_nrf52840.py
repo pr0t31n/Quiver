@@ -1046,6 +1046,42 @@ def _butterfly_hex_for_dk():
     return None
 
 
+def _prep_butterfly_flash(port: str) -> bool:
+    """Firmware-payload PREPARE for ButteRFly (WHAD BLE MITM, Rx/Tx): obtain
+    butterfly.hex and a J-Link backend so only the write remains."""
+    ready = True
+    if not (find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()):
+        err("  nRF52840-DK J-Link not detected on USB (connect the J-LINK port).")
+        ready = False
+    hexf = _butterfly_hex_for_dk()
+    if hexf and Path(hexf).exists():
+        ok(f"  ButteRFly firmware ready: {hexf}")
+    else:
+        err("  butterfly.hex unavailable (auto-download from whad-team/butterfly failed).")
+        info("  Drop butterfly.hex into firmware/nordic_nrf52840/butterfly/ and retry.")
+        ready = False
+    backend = _ensure_flash_backend()
+    if backend:
+        ok(f"  Flash backend ready: {backend}")
+    else:
+        err("  No J-Link flash backend could be provisioned.")
+        ready = False
+    return ready
+
+
+def _autoflash_butterfly(port: str):
+    """Firmware-payload FLASH: everything is prepped — write butterfly.hex."""
+    hexf = _butterfly_hex_for_dk()
+    if not hexf or not Path(hexf).exists():
+        err("butterfly.hex missing at flash time — aborting.")
+        return
+    if _flash_dk_hex(hexf, erase_all=False):
+        ok("ButteRFly flashed — the DK is now a WHAD BLE Rx/Tx (active MITM) radio.")
+        info("Drive it with the WHAD host tools (wsniff/wanalyze); see the 'BLE MITM' op.")
+    else:
+        err("Flash failed — re-seat the J-LINK cable and retry.")
+
+
 def op_ble_mitm():
     heading("BLE MITM (WHAD + ButteRFly)")
     info("Active man-in-the-middle for BLE — used when the target pairs with LE")
@@ -1282,17 +1318,31 @@ def main():
     # Firmware payload selected on the main page → auto-flash (no menu).
     fw = selected_firmware_payload()
     if fw:
-        run_firmware_payload(
-            fw.get("label", "Flash nRF Sniffer (DK)"),
-            info_fn=lambda: op_device_info(port),
-            prepare_fn=lambda: _prep_sniffer_flash(port),
-            flash_fn=lambda: _autoflash_nrf_sniffer(port),
-            summary_lines=[
-                f"Board    : {TOOL_NAME} (nRF52840-DK)",
-                f"Firmware : {fw.get('firmware', 'nRF Sniffer for Bluetooth LE')}",
-                "Flasher  : auto-provisioned J-Link backend (nrfjprog/JLink/nrfutil)",
-            ],
-        )
+        fwname = fw.get("firmware", "")
+        if "butterfly" in fwname.lower():
+            run_firmware_payload(
+                fw.get("label", "Flash ButteRFly (BLE MITM)"),
+                info_fn=lambda: op_device_info(port),
+                prepare_fn=lambda: _prep_butterfly_flash(port),
+                flash_fn=lambda: _autoflash_butterfly(port),
+                summary_lines=[
+                    f"Board    : {TOOL_NAME} (nRF52840-DK)",
+                    "Firmware : ButteRFly (whad-team) — BLE Rx/Tx (active MITM)",
+                    "Flasher  : J-Link/SWD (butterfly.hex)",
+                ],
+            )
+        else:
+            run_firmware_payload(
+                fw.get("label", "Flash nRF Sniffer (DK)"),
+                info_fn=lambda: op_device_info(port),
+                prepare_fn=lambda: _prep_sniffer_flash(port),
+                flash_fn=lambda: _autoflash_nrf_sniffer(port),
+                summary_lines=[
+                    f"Board    : {TOOL_NAME} (nRF52840-DK)",
+                    f"Firmware : {fw.get('firmware', 'nRF Sniffer for Bluetooth LE')}",
+                    "Flasher  : auto-provisioned J-Link backend (nrfjprog/JLink/nrfutil)",
+                ],
+            )
         return
 
     MENU_OPTIONS = [
