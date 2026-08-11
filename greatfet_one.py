@@ -23,7 +23,9 @@ from common import (
     require_sudo, sudo_run,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
 )
+import shutil
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -157,16 +159,10 @@ def op_device_info():
         info(FIRMWARE_MISMATCH_NOTE)
 
 
-def op_update_firmware():
-    heading("Update Firmware")
-    info("Reflashing the GreatFET firmware to match the installed Python package version.")
-    info("This is required after installing or upgrading the greatfet pip package.")
-    info("The device will reboot into DFU mode, flash, then reboot as normal GreatFET.")
-    warn("This will flash firmware matching the installed greatfet Python package version.")
-    if not confirm("Proceed with firmware update?", default=False):
-        info("Cancelled.")
-        return
-
+def _greatfet_flash_firmware():
+    """Shared flash core: reflash the GreatFET firmware to match the installed
+    greatfet Python package (via `gf fw --auto`, falling back to
+    `greatfet firmware --autoflash`). Reused by the menu op and the payload."""
     info("Running: gf fw --auto")
     info("Expected: DFU mode entry, firmware download, reboot.")
     info("If the device disappears and reappears — that is normal behaviour.")
@@ -193,6 +189,40 @@ def op_update_firmware():
             info("  - Verify udev rules allow DFU mode access (VID 1FC9:000C)")
     except Exception as e:
         err(f"Firmware update failed: {e}")
+
+
+def op_update_firmware():
+    heading("Update Firmware")
+    info("Reflashing the GreatFET firmware to match the installed Python package version.")
+    info("This is required after installing or upgrading the greatfet pip package.")
+    info("The device will reboot into DFU mode, flash, then reboot as normal GreatFET.")
+    warn("This will flash firmware matching the installed greatfet Python package version.")
+    if not confirm("Proceed with firmware update?", default=False):
+        info("Cancelled.")
+        return
+    _greatfet_flash_firmware()
+
+
+def _prep_greatfet_firmware() -> bool:
+    """Firmware-payload PREPARE: ensure the greatfet package (which carries the
+    matching firmware image flashed by `gf fw --auto`) is installed and the
+    device is present. Returns True only when ready to flash."""
+    ready = True
+    if shutil.which("gf") is None and shutil.which("greatfet") is None:
+        info("  GreatFET CLI not on PATH — installing the greatfet package…")
+        ensure_pip_packages([("greatfet", "greatfet")])
+    if shutil.which("gf") is None and shutil.which("greatfet") is None:
+        err("  GreatFET CLI still unavailable — install it: "
+            "pip install greatfet --break-system-packages")
+        ready = False
+    else:
+        ok("  GreatFET firmware tooling present.")
+    if not detect_greatfet():
+        err("  GreatFET One not detected on USB — connect the CONTROL port before flashing.")
+        ready = False
+    else:
+        ok("  GreatFET One detected.")
+    return ready
 
 
 # ── GPIO submenu ───────────────────────────────────────────────────────────────
@@ -695,6 +725,22 @@ def main():
     ok("GreatFET One detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Update Firmware"),
+            info_fn=op_device_info,
+            prepare_fn=_prep_greatfet_firmware,
+            flash_fn=_greatfet_flash_firmware,
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'greatfet')} (matches installed greatfet package)",
+                "Flasher  : gf fw --auto (DFU) — falls back to greatfet firmware --autoflash",
+            ],
+        )
+        return
 
     while True:
         choice = numbered_menu("GreatFET One — Select Operation", MENU_OPTIONS)

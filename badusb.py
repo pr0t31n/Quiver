@@ -43,6 +43,8 @@ from common import (
     find_mounted_drive,
     detect_usb_libusb_any,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, get_selected_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -739,6 +741,336 @@ def check_firmware_version():
         warn("Could not check GitHub for micronucleus updates.")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ..." auto-flash) ─────────────────
+# Wires the module's EXISTING programming flows as no-menu payloads. These
+# devices carry operator-compiled sketches (no auto-source firmware exists), so
+# each prepare_fn installs the flasher and locates an operator-supplied .hex,
+# aborting BEFORE the confirmation if none is present.
+#   DigiSpark (ATtiny85 + Micronucleus) — micronucleus --run <hex>
+#   Arduino Micro / SparkFun Pro Micro (ATmega32U4 + Caterina) — avrdude avr109
+# Compile sketches with the Arduino IDE (Sketch → Export Compiled Binary) and
+# drop the .hex into the firmware dir. DuckyScript → Arduino via Duckuino
+# (https://github.com/Plazmaz/Duckuino).
+
+ARDUINO_VID_PIDS = [(0x2341, 0x8037), (0x1B4F, 0x9205), (0x1B4F, 0x9206)]
+
+
+def _fw_dir() -> Path:
+    d = get_firmware_dir("badusb")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _find_operator_hex():
+    """Newest operator-supplied .hex from the firmware dir or payloads/badusb/."""
+    cands = []
+    for d in [_fw_dir(), PAYLOADS_DIR]:
+        if d.exists():
+            cands.extend(sorted(d.glob("*.hex")))
+    return cands[-1] if cands else None
+
+
+def _ensure_micronucleus() -> str:
+    mn = run_output("which micronucleus 2>/dev/null")
+    if mn and mn.strip():
+        return mn.strip()
+    info("  micronucleus not found — attempting install…")
+    if get_os_flavor() == "macos":
+        ensure_brew_packages(["--cask digistump"])
+    else:
+        ensure_apt_packages(["micronucleus"])
+    mn = run_output("which micronucleus 2>/dev/null")
+    return mn.strip() if (mn and mn.strip()) else ""
+
+
+def _ensure_avrdude() -> str:
+    av = run_output("which avrdude 2>/dev/null")
+    if av and av.strip():
+        return av.strip()
+    info("  avrdude not found — attempting install…")
+    if get_os_flavor() == "macos":
+        ensure_brew_packages(["avrdude"])
+    else:
+        ensure_apt_packages(["avrdude"])
+    av = run_output("which avrdude 2>/dev/null")
+    return av.strip() if (av and av.strip()) else ""
+
+
+def _fw_device_info():
+    heading("Device Info")
+    info(f"Board : {TOOL_NAME}")
+    info("BadUSB devices are HID/USB — programming is over the bootloader, not a console.")
+
+
+def _prep_digispark(staged) -> bool:
+    mn = _ensure_micronucleus()
+    if not mn:
+        err("  micronucleus could not be installed — aborting before the flash.")
+        info("  Install: https://github.com/micronucleus/micronucleus/releases")
+        return False
+    hexf = _find_operator_hex()
+    if not hexf:
+        err("  No operator-supplied .hex found — aborting before the flash.")
+        info(f"  Place a compiled ATtiny85 .hex in {_fw_dir()} (or payloads/badusb/).")
+        return False
+    staged["mn"] = mn
+    staged["hex"] = hexf
+    ok(f"  Ready: micronucleus + {hexf.name}")
+    return True
+
+
+def _prep_arduino(staged) -> bool:
+    av = _ensure_avrdude()
+    if not av:
+        err("  avrdude could not be installed — aborting before the flash.")
+        info("  Install: https://github.com/avrdudes/avrdude/releases")
+        return False
+    hexf = _find_operator_hex()
+    if not hexf:
+        err("  No operator-supplied .hex found — aborting before the flash.")
+        info(f"  Place a compiled ATmega32U4 .hex in {_fw_dir()} (or payloads/badusb/).")
+        return False
+    port = find_serial_port_by_vidpid(ARDUINO_VID_PIDS)
+    if not port:
+        err("  No Arduino Micro / Pro Micro serial port found — aborting before the flash.")
+        info("  Connect the board and ensure it enumerates as /dev/ttyACM* or /dev/cu.usbmodem*.")
+        return False
+    staged["hex"] = hexf
+    staged["port"] = port
+    ok(f"  Ready: avrdude + {hexf.name}  (port {port})")
+    return True
+
+
+def _flash_digispark(staged):
+    cmd = [staged["mn"], "--run", str(staged["hex"])]
+    info(f"Running: {' '.join(cmd)}")
+    info(">>> PLUG IN THE DIGISPARK NOW <<<  (micronucleus is listening ~60s)")
+    run_streaming(cmd, on_line=lambda l: info(f"  micronucleus: {l}"), timeout=120)
+
+
+def _flash_arduino(staged):
+    port = staged["port"]
+    hexf = staged["hex"]
+    info("  Triggering the Caterina bootloader via a 1200-baud open/close…")
+    try:
+        import serial
+        s = serial.Serial(port, 1200)
+        time.sleep(0.1)
+        s.close()
+        time.sleep(3)
+        np = find_serial_port_by_vidpid(ARDUINO_VID_PIDS)
+        if np:
+            port = np
+    except Exception as e:
+        warn(f"  1200-baud reset failed ({e}) — double-tap RST manually if avrdude stalls.")
+    cmd = ["avrdude", "-p", "atmega32u4", "-P", port, "-c", "avr109",
+           "-b", "57600", "-D", "-U", f"flash:w:{hexf}:i"]
+    info(f"Running: {' '.join(cmd)}")
+    run_streaming(cmd, on_line=lambda l: info(f"  avrdude: {l}"), timeout=120)
+
+
+# ── Local .ino → .hex compilation (arduino-cli) ───────────────────────────────
+# BadUSB "firmware" is a compiled Arduino sketch. Rather than requiring a prebuilt
+# .hex, this compiles a selected .ino locally with arduino-cli — installing the
+# correct board core (DigiSpark / Arduino Micro / SparkFun Pro Micro) — then flashes
+# the result with the module's existing micronucleus / avrdude path. The sketch
+# comes from the operator (selected payload, firmware dir, or a cloned public repo
+# via import_community_payloads.py --tools badusb); it is not authored here.
+#
+# core, FQBN, and (optional) board-manager index per board kind:
+_ARDUINO_CORES = {
+    "digispark": ("digistump:avr", "digistump:avr:digispark-tiny",
+                  "https://raw.githubusercontent.com/ArminJo/DigistumpArduino/master/package_digistump_index.json"),
+    "micro":     ("arduino:avr", "arduino:avr:micro", None),
+    "promicro5": ("SparkFun:avr", "SparkFun:avr:promicro:cpu=16MHzatmega32U4",
+                  "https://raw.githubusercontent.com/sparkfun/Arduino_Boards/master/IDE_Board_Manager/package_sparkfun_index.json"),
+    "promicro3": ("SparkFun:avr", "SparkFun:avr:promicro:cpu=8MHzatmega32U4",
+                  "https://raw.githubusercontent.com/sparkfun/Arduino_Boards/master/IDE_Board_Manager/package_sparkfun_index.json"),
+}
+
+
+def _ensure_arduino_cli() -> str:
+    a = run_output("which arduino-cli 2>/dev/null")
+    if a and a.strip():
+        return a.strip()
+    info("  arduino-cli not found — installing…")
+    if get_os_flavor() == "macos":
+        ensure_brew_packages(["arduino-cli"])
+    else:
+        run("curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/"
+            "install.sh | BINDIR=/usr/local/bin sh")
+    a = run_output("which arduino-cli 2>/dev/null")
+    return a.strip() if (a and a.strip()) else ""
+
+
+def _resolve_badusb_board() -> str:
+    """Board kind from QUIVER_BADUSB_BOARD, else auto-detected from the connected
+    VID:PID. DigiSpark isn't a serial device, so it's the fallback default."""
+    env = os.environ.get("QUIVER_BADUSB_BOARD", "").strip().lower()
+    if env in _ARDUINO_CORES:
+        return env
+    if find_serial_port_by_vidpid([(0x1B4F, 0x9205)]):
+        return "promicro5"
+    if find_serial_port_by_vidpid([(0x1B4F, 0x9206)]):
+        return "promicro3"
+    if find_serial_port_by_vidpid([(0x2341, 0x8037)]):
+        return "micro"
+    return "digispark"
+
+
+def _ensure_arduino_core(kind: str) -> bool:
+    cli = _ensure_arduino_cli()
+    if not cli:
+        err("  arduino-cli could not be installed.")
+        return False
+    core, _fqbn, index = _ARDUINO_CORES[kind]
+    run(f"{cli} config init --overwrite")
+    if index:
+        run(f"{cli} config add board_manager.additional_urls {index}")
+    run(f"{cli} core update-index")
+    if run(f"{cli} core install {core}").returncode != 0:
+        err(f"  Could not install the Arduino core '{core}'.")
+        return False
+    return True
+
+
+def _select_badusb_ino():
+    """The .ino to compile: the selected payload if it's a sketch, else the newest
+    .ino under the firmware dir / payloads/badusb/ (including cloned community/)."""
+    p = get_selected_payload()
+    if p and str(p).endswith(".ino"):
+        pth = Path(p) if os.path.isabs(p) else (Path(__file__).resolve().parent / p)
+        if pth.exists():
+            return pth
+    cands = []
+    for d in (_fw_dir(), PAYLOADS_DIR):
+        if d and Path(d).exists():
+            cands.extend(sorted(Path(d).rglob("*.ino")))
+    return cands[-1] if cands else None
+
+
+def _compile_ino(ino_path, kind: str):
+    """Compile a sketch with arduino-cli for the board kind. arduino-cli compiles a
+    sketch DIRECTORY whose name matches the .ino, so a loose .ino is staged into
+    <tmp>/<stem>/<stem>.ino first. Returns the application .hex (not the
+    *.with_bootloader.hex), or None on failure."""
+    import tempfile
+    import shutil as _sh
+    cli = _ensure_arduino_cli()
+    if not cli:
+        return None
+    _core, fqbn, _index = _ARDUINO_CORES[kind]
+    ino_path = Path(ino_path)
+    stem = ino_path.stem
+    tmp = Path(tempfile.mkdtemp(prefix="quiver_badusb_"))
+    sketchdir = tmp / stem
+    sketchdir.mkdir(parents=True, exist_ok=True)
+    _sh.copy(str(ino_path), str(sketchdir / f"{stem}.ino"))
+    out = tmp / "out"
+    info(f"  Compiling {ino_path.name} for {fqbn}…")
+    rc = run_streaming([cli, "compile", "--fqbn", fqbn, "--output-dir", str(out),
+                        str(sketchdir)],
+                       on_line=lambda l: info(f"  arduino-cli: {l}"), timeout=600)
+    if rc != 0:
+        return None
+    hexes = [p for p in sorted(out.glob("*.hex")) if "with_bootloader" not in p.name]
+    if not hexes:
+        hexes = sorted(out.glob("*.hex"))
+    return hexes[-1] if hexes else None
+
+
+def _prep_compile_sketch(staged) -> bool:
+    """PREPARE: resolve the board + sketch, install the toolchain/core, compile the
+    .ino to .hex, and ensure the flasher — so only the write remains. Returns True
+    only when a .hex was produced and the flasher is ready."""
+    kind = _resolve_badusb_board()
+    ino = _select_badusb_ino()
+    if not ino:
+        err("  No .ino sketch found — select one as the payload, drop one in the")
+        info(f"  firmware dir ({_fw_dir()}), or import public sketches:")
+        info("    payloads/import_community_payloads.py --tools badusb")
+        return False
+    info(f"  Board : {kind}    Sketch : {ino.name}")
+    if not _ensure_arduino_core(kind):
+        return False
+    hexf = _compile_ino(ino, kind)
+    if not hexf:
+        err("  Compilation failed — aborting before the flash (see arduino-cli output).")
+        return False
+    ok(f"  Compiled: {hexf.name}")
+    staged["kind"] = kind
+    staged["hex"] = hexf
+    if kind == "digispark":
+        mn = _ensure_micronucleus()
+        if not mn:
+            err("  micronucleus could not be installed — aborting before the flash.")
+            return False
+        staged["mn"] = mn
+    else:
+        if not _ensure_avrdude():
+            err("  avrdude could not be installed — aborting before the flash.")
+            return False
+        port = find_serial_port_by_vidpid(ARDUINO_VID_PIDS)
+        if not port:
+            err("  No Arduino/Pro Micro serial port found — aborting before the flash.")
+            return False
+        staged["port"] = port
+    return True
+
+
+def _flash_compiled_sketch(staged):
+    if staged.get("kind") == "digispark":
+        _flash_digispark(staged)      # uses staged["mn"], staged["hex"]
+    else:
+        _flash_arduino(staged)        # uses staged["port"], staged["hex"]
+
+
+def _dispatch_firmware_payload(fw: dict):
+    """Route a selected .qfw firmware payload to the right prepare/flash pair."""
+    fw_name = fw.get("firmware", "")
+    label = fw.get("label", f"Flash {fw_name}")
+    staged: dict = {}
+    if fw_name == "Compile Sketch":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_compile_sketch(staged),
+            flash_fn=lambda: _flash_compiled_sketch(staged),
+            summary_lines=[
+                "Board    : auto (DigiSpark / Arduino Micro / Pro Micro) — QUIVER_BADUSB_BOARD overrides",
+                "Firmware : Arduino sketch (.ino) compiled locally via arduino-cli",
+                "Flasher  : micronucleus (DigiSpark) / avrdude avr109 (ATmega32U4)",
+            ],
+        )
+    elif fw_name == "DigiSpark":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_digispark(staged),
+            flash_fn=lambda: _flash_digispark(staged),
+            summary_lines=[
+                f"Board    : DigiSpark (ATtiny85 + Micronucleus)",
+                "Firmware : operator-supplied compiled .hex (Arduino sketch)",
+                "Flasher  : micronucleus --run",
+            ],
+        )
+    elif fw_name == "Arduino Micro / Pro Micro":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_arduino(staged),
+            flash_fn=lambda: _flash_arduino(staged),
+            summary_lines=[
+                f"Board    : Arduino Micro / SparkFun Pro Micro (ATmega32U4 + Caterina)",
+                "Firmware : operator-supplied compiled .hex (Arduino sketch)",
+                "Flasher  : avrdude -c avr109 (1200-baud bootloader trigger)",
+            ],
+        )
+    else:
+        err(f"Unknown firmware payload: {fw_name!r}")
+        info("  Supported: DigiSpark, Arduino Micro / Pro Micro")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -805,6 +1137,12 @@ def main():
     info("")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     MENU_OPTIONS = [
         "Device Info (lsusb)",

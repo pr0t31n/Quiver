@@ -25,6 +25,8 @@ from common import (
     ensure_system_tool,
     web_detect_loop, run_streaming,
     check_latest_github_release, compare_versions, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, download_firmware, get_github_release_asset_url,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -499,6 +501,101 @@ def op_firmware_update():
         info("Troubleshooting: confirm .dfu file is valid and device is in DFU mode (VID:PID 1D50:6003)")
 
 
+# ── Firmware payload (main-page) ──────────────────────────────────────────────
+
+def _ubertooth_fw_dir() -> Path:
+    return get_firmware_dir("ubertooth_one")
+
+
+def _find_ubertooth_dfu():
+    """Newest downloaded/operator-supplied Ubertooth .dfu image, or None.
+    Prefers bluetooth_rxtx.dfu (the Ubertooth One BLE/BR-EDR image)."""
+    d = _ubertooth_fw_dir()
+    if not d.exists():
+        return None
+    dfus = sorted(d.rglob("*.dfu"))
+    for f in dfus:
+        if f.name == "bluetooth_rxtx.dfu":
+            return f
+    return dfus[-1] if dfus else None
+
+
+def _download_ubertooth_firmware():
+    """Fetch the Ubertooth One firmware .dfu from the greatscottgadgets/ubertooth
+    release (extracting from the firmware zip). Returns the .dfu Path or None.
+    Source: https://github.com/greatscottgadgets/ubertooth/releases"""
+    d = _ubertooth_fw_dir()
+    d.mkdir(parents=True, exist_ok=True)
+
+    url = get_github_release_asset_url("greatscottgadgets", "ubertooth", "",
+                                       r"ubertooth-one-firmware.*\.zip$")
+    if not url:
+        url = get_github_release_asset_url("greatscottgadgets", "ubertooth", "",
+                                           r".*firmware.*\.zip$")
+    if url:
+        zdest = d / "ubertooth-firmware.zip"
+        if download_firmware(url, zdest, "Ubertooth firmware"):
+            try:
+                import zipfile
+                with zipfile.ZipFile(zdest) as z:
+                    names = z.namelist()
+                    target = next((n for n in names
+                                   if n.endswith("bluetooth_rxtx.dfu")), None)
+                    if not target:
+                        target = next((n for n in names if n.endswith(".dfu")), None)
+                    if target:
+                        z.extract(target, d)
+                        return d / target
+                warn("No .dfu image found inside the firmware zip.")
+            except Exception as e:
+                warn(f"Could not extract .dfu from firmware zip: {e}")
+    return None
+
+
+def _prep_ubertooth_firmware() -> bool:
+    """PREPARE step: ensure the DFU tools are present and the .dfu image is
+    downloaded so only the write remains. Returns True only when ready."""
+    ready = True
+    if not _require_tool("ubertooth-util"):
+        err("  ubertooth-util not available — cannot enter DFU mode.")
+        ready = False
+    if not _require_tool("ubertooth-dfu"):
+        err("  ubertooth-dfu not available — cannot flash.")
+        ready = False
+
+    dfu = _find_ubertooth_dfu() or _download_ubertooth_firmware()
+    if dfu and Path(dfu).exists():
+        ok(f"  Firmware ready: {dfu}")
+    else:
+        err("  Ubertooth firmware .dfu could not be sourced automatically.")
+        info(f"  Drop bluetooth_rxtx.dfu into: {_ubertooth_fw_dir()}")
+        info("  Source: https://github.com/greatscottgadgets/ubertooth/releases")
+        ready = False
+    return ready
+
+
+def _flash_ubertooth_firmware():
+    """FLASH step: reuse the two-step DFU write (ubertooth-util -f then
+    ubertooth-dfu) — identical to op_firmware_update's writer."""
+    dfu = _find_ubertooth_dfu()
+    if not dfu or not Path(dfu).exists():
+        err("Firmware .dfu missing at flash time — aborting.")
+        return
+    info("Step 1: Entering DFU mode (ubertooth-util -f)…")
+    rc1 = run_streaming_sudo(["ubertooth-util", "-f"], on_line=lambda l: info(l), timeout=10)
+    if rc1 != 0:
+        warn(f"ubertooth-util -f exited with code {rc1} — device may already be in DFU mode.")
+    info("Waiting 3 seconds for device to re-enumerate in DFU mode…")
+    time.sleep(3)
+    info(f"Step 2: Flashing {Path(dfu).name} via ubertooth-dfu…")
+    cmd = ["ubertooth-dfu", "-d", str(dfu), "-U", "0"]
+    rc2 = run_streaming_sudo(cmd, on_line=lambda l: info(l), timeout=120)
+    if rc2 == 0:
+        ok("Firmware update complete. Replug the Ubertooth One.")
+    else:
+        warn(f"ubertooth-dfu exited with code {rc2}")
+
+
 def op_reset_device():
     heading("Reset Device")
     info("Sends a USB reset command to the Ubertooth One via ubertooth-util -r.")
@@ -536,6 +633,22 @@ def main():
     ok("Ubertooth One detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Firmware Update (ubertooth-dfu)"),
+            info_fn=op_device_info,
+            prepare_fn=_prep_ubertooth_firmware,
+            flash_fn=_flash_ubertooth_firmware,
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'Ubertooth-One')} (bluetooth_rxtx.dfu)",
+                "Flasher  : ubertooth-util -f  →  ubertooth-dfu -d <dfu> -U 0",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info (ubertooth-util -v)",

@@ -24,6 +24,7 @@ from common import (
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
+    selected_firmware_payload, run_firmware_payload, get_firmware_dir,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -351,6 +352,105 @@ def op_serial_console():
     info("Install minicom: sudo apt install minicom")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ") ───────────────────────────────
+
+def _fw_user_dir() -> Path:
+    d = get_firmware_dir("lilygo_tzigbee") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _ensure_cc2538_bsl() -> Path:
+    """Clone JelmerT/cc2538-bsl (the CC2538/CC26xx serial bootloader flasher) if
+    absent and return the path to cc2538-bsl.py, or None on failure."""
+    bsl_script = Path(__file__).parent / "cc2538-bsl" / "cc2538-bsl.py"
+    if bsl_script.exists():
+        ok(f"  cc2538-bsl present: {bsl_script}")
+        return bsl_script
+    clone_dir = Path(__file__).parent / "cc2538-bsl"
+    info("  Cloning cc2538-bsl from https://github.com/JelmerT/cc2538-bsl …")
+    r = run(f"git clone https://github.com/JelmerT/cc2538-bsl {clone_dir}")
+    if r.returncode == 0 and bsl_script.exists():
+        ok("  cc2538-bsl cloned.")
+        return bsl_script
+    err("  Failed to clone cc2538-bsl. Ensure git is installed and retry.")
+    return None
+
+
+def _run_esp32c3_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        bins = sorted(d.glob("*.bin"))
+        f = bins[0] if len(bins) == 1 else (d / "app.bin" if (d / "app.bin").exists() else None)
+        if not f:
+            err("  No ESP32-C3 .bin found. Set the DIP switch to Position 1 and drop the")
+            err(f"  merged .bin into: {d}")
+            return False
+        state["fw"] = f
+        ok(f"  ESP32-C3 firmware ready: {f}")
+        return True
+
+    def flash():
+        flash_esp32c3(port, str(state["fw"]))
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32-C3 firmware"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       "DIP      : Position 1 (ESP32-C3 programming)",
+                       "Firmware : operator-supplied merged .bin → 0x0 (esptool)",
+                       f"Port     : {port}"])
+
+
+def _run_zigbee_coordinator_payload(fw, port):
+    state = {}
+
+    def prep():
+        bsl = _ensure_cc2538_bsl()
+        if not bsl:
+            return False
+        d = _fw_user_dir()
+        hexes = sorted(d.glob("*.hex"))
+        f = hexes[0] if hexes else None
+        if not f:
+            err("  No Zigbee coordinator .hex found. Download a Z-Stack coordinator image")
+            err("  from https://github.com/Koenkk/Z-Stack-firmware (coordinator/Z-Stack_3.x.0/)")
+            err(f"  and drop the .hex into: {d}")
+            return False
+        state["bsl"] = bsl
+        state["hex"] = f
+        ok(f"  Coordinator firmware ready: {f}")
+        return True
+
+    def flash():
+        cmd = [sys.executable, str(state["bsl"]), "-ewv", "-p", port,
+               "--baud", "500000", str(state["hex"])]
+        info(f"Running: {' '.join(cmd)}")
+        run_streaming(cmd, on_line=lambda l: info(l), timeout=180)
+
+    run_firmware_payload(
+        fw.get("label", "Flash Zigbee coordinator"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       "DIP      : Position 2 (Zigbee radio / ZNP)",
+                       "Firmware : Z-Stack coordinator .hex via cc2538-bsl (Koenkk/Z-Stack-firmware)",
+                       f"Port     : {port}"])
+
+
+def _dispatch_firmware_payload(fw, port):
+    name = fw.get("firmware", "")
+    if name == "ESP32C3":
+        _run_esp32c3_payload(fw, port)
+    elif name == "ZigbeeCoordinator":
+        _run_zigbee_coordinator_payload(fw, port)
+    else:
+        err(f"Unknown firmware payload '{name}' for {TOOL_NAME}.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -386,6 +486,12 @@ def main():
         sys.exit(1)
 
     ok(f"Connected on {port}")
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Device Info",

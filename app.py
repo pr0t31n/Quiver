@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.19.0"
+VERSION = "1.21.1"
 
 import concurrent.futures
 import ipaddress
@@ -1465,7 +1465,13 @@ def api_nexus_status():
 @app.route("/", methods=["GET"])
 def index():
     payloads = _load_payloads()
-    return render_template("index.html", tools=TOOLS, payloads=payloads, tool_groups=TOOL_GROUPS)
+    # Display tools alphabetically by name in BOTH the dropdown and the grid
+    # (index.html iterates tools.items() for each). Sorting the dict passed to the
+    # template — dicts preserve insertion order — covers both; TOOLS itself stays
+    # unchanged for lookups elsewhere. Category-filter tabs are unaffected.
+    tools_sorted = dict(sorted(TOOLS.items(),
+                               key=lambda kv: kv[1].get("name", kv[0]).lower()))
+    return render_template("index.html", tools=tools_sorted, payloads=payloads, tool_groups=TOOL_GROUPS)
 
 
 @app.route("/tool/<tool_id>", methods=["GET"])

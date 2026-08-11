@@ -23,7 +23,9 @@ from common import (
     require_sudo, sudo_run,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
 )
+import shutil
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -379,6 +381,65 @@ def op_usb_emulation():
         info("Cancelled.")
 
 
+# ── Firmware payload wiring ────────────────────────────────────────────────────
+
+def _prep_cynthion_firmware() -> bool:
+    """Firmware-payload PREPARE: make sure the `cynthion` tooling (which fetches
+    the firmware/bitstream from its packaged metadata at update time) is present
+    and the device is on the CONTROL port. Returns True only when ready.
+    The vendor `cynthion update` CLI downloads the actual images itself."""
+    ok_ready = True
+    if shutil.which("cynthion") is None:
+        info("  'cynthion' CLI not on PATH — installing the update tooling…")
+        ensure_pip_packages([
+            ("cynthion",    "cynthion"),
+            ("apollo_fpga", "apollo-fpga"),
+        ])
+    if shutil.which("cynthion") is None:
+        err("  'cynthion' CLI still unavailable — install it: "
+            "pip install cynthion apollo-fpga --break-system-packages")
+        ok_ready = False
+    else:
+        ok("  'cynthion' update tooling present.")
+    if not detect_cynthion():
+        err("  Cynthion not detected on the CONTROL port — connect it before flashing.")
+        ok_ready = False
+    else:
+        ok("  Cynthion detected on the CONTROL port.")
+    return ok_ready
+
+
+def _dispatch_firmware_payload(fw: dict):
+    """Route the selected firmware payload to the right Cynthion update path,
+    reusing the module's existing `cynthion update` streaming helper."""
+    which = (fw.get("firmware") or "").strip().lower()
+    label = fw.get("label", "Update Firmware")
+    if which in ("mcu", "mcu-only", "mcu_firmware"):
+        run_firmware_payload(
+            label,
+            info_fn=op_device_info,
+            prepare_fn=_prep_cynthion_firmware,
+            flash_fn=lambda: _run_cynthion_streaming(["update", "--mcu-firmware"], timeout=180),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Apollo SAMD21 MCU only (no FPGA bitstream)",
+                "Flasher  : cynthion update --mcu-firmware",
+            ],
+        )
+    else:
+        run_firmware_payload(
+            label,
+            info_fn=op_device_info,
+            prepare_fn=_prep_cynthion_firmware,
+            flash_fn=lambda: _run_cynthion_streaming(["update"], timeout=300),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Apollo SAMD21 MCU + ECP5 FPGA bitstream",
+                "Flasher  : cynthion update",
+            ],
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -411,6 +472,12 @@ def main():
     ok("Cynthion detected (Apollo SAMD21 control interface).")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-run (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     MENU_OPTIONS = [
         "Device Info",

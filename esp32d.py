@@ -34,6 +34,8 @@ from common import (
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, get_github_release_asset_url, download_firmware,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -451,6 +453,229 @@ def check_firmware_version(port: str):
         info("Latest MicroPython for ESP32: https://micropython.org/download/esp32/")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ") ───────────────────────────────
+
+MARAUDER_OWNER = "justcallmekoko"
+MARAUDER_REPO  = "ESP32Marauder"
+
+
+def _fw_user_dir() -> Path:
+    """Directory where the operator drops firmware images for the payloads."""
+    d = get_firmware_dir("esp32d") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _download_release_asset(owner, repo, patterns, dest_dir, what):
+    """Download the first GitHub release asset matching any of *patterns* (regex)."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tag, _ = check_latest_github_release(owner, repo)
+    for pat in patterns:
+        url = get_github_release_asset_url(owner, repo, tag or "", pat)
+        if url:
+            fname = url.rsplit("/", 1)[-1]
+            dest = dest_dir / fname
+            if dest.exists() and dest.stat().st_size > 0:
+                ok(f"  {what} already present: {dest.name}")
+                return dest
+            if download_firmware(url, dest, what):
+                return dest
+    return None
+
+
+def _run_app_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        f = d / "app.bin"
+        if not f.exists():
+            bins = sorted(d.glob("*.bin"))
+            f = bins[0] if len(bins) == 1 else None
+        if not f:
+            err("  No application image found. Drop the merged app .bin as 'app.bin' into:")
+            err(f"    {d}")
+            return False
+        state["fw"] = f
+        ok(f"  Application firmware ready: {f}")
+        return True
+
+    def flash():
+        _run_esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "dio", "--flash_size", "detect",
+            "0x10000", str(state["fw"]),
+        ], timeout=180)
+
+    run_firmware_payload(
+        fw.get("label", "Flash application firmware"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            "Firmware : operator-supplied merged app image → 0x10000",
+            f"Port     : {port}",
+        ],
+    )
+
+
+def _run_partition_payload(fw, port):
+    state = {}
+    layout = [("0x1000", "bootloader.bin"), ("0x8000", "partitions.bin"),
+              ("0xe000", "boot_app0.bin"), ("0x10000", "app.bin")]
+
+    def prep():
+        d = _fw_user_dir()
+        missing = [n for _, n in layout if not (d / n).exists()]
+        if missing:
+            err(f"  Missing partition image(s): {', '.join(missing)}")
+            err("  Drop bootloader.bin, partitions.bin, boot_app0.bin and app.bin into:")
+            err(f"    {d}")
+            return False
+        state["files"] = [(off, str(d / n)) for off, n in layout]
+        ok("  All four partition images present.")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                "write_flash", "--flash_mode", "dio", "--flash_size", "detect"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _run_esptool(args, timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash full partition set"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            "Firmware : operator-supplied bootloader+partitions+boot_app0+app",
+            f"Port     : {port}",
+        ],
+    )
+
+
+def _run_marauder_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("esp32d") / "marauder"
+
+    def prep():
+        binf = _download_release_asset(
+            MARAUDER_OWNER, MARAUDER_REPO,
+            [r"esp32_marauder.*generic.*\.bin",
+             r"esp32_marauder_v\d[^/]*\.bin",
+             r"esp32_marauder[^/]*\.bin"],
+            dest, "ESP32 Marauder firmware")
+        if not binf:
+            err("  Could not fetch an ESP32 Marauder firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MARAUDER_OWNER}/{MARAUDER_REPO}/releases")
+            err(f"  or drop the correct board .bin into {dest}.")
+            return False
+        blf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"bootloader[^/]*\.bin"], dest, "bootloader")
+        ptf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"partitions[^/]*\.bin"], dest, "partitions")
+        b0f = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"boot_app0[^/]*\.bin"], dest, "boot_app0")
+        if blf and ptf and b0f:
+            state["files"] = [("0x1000", str(blf)), ("0x8000", str(ptf)),
+                              ("0xe000", str(b0f)), ("0x10000", str(binf))]
+            ok("  Full Marauder image set ready (bootloader+partitions+boot_app0+firmware).")
+        else:
+            state["files"] = [("0x10000", str(binf))]
+            warn("  Only the Marauder firmware image was available; flashing app slot at 0x10000.")
+            warn("  A first-time/clean install may also require bootloader/partitions/boot_app0")
+            warn("  (see the ESP32Marauder wiki 'Flashing with esptool').")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                "write_flash", "--flash_mode", "dio", "--flash_size", "detect"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _run_esptool(args, timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32 Marauder"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : ESP32 Marauder ({MARAUDER_OWNER}/{MARAUDER_REPO})",
+            f"Port     : {port}",
+        ],
+    )
+
+
+MESHTASTIC_OWNER = "meshtastic"
+MESHTASTIC_REPO  = "firmware"
+
+
+def _run_meshtastic_payload(fw, port):
+    """Meshtastic on a generic ESP32. Meshtastic REQUIRES an attached LoRa radio
+    (SX127x/SX126x) — a bare ESP32-D has none, so the flash succeeds but the mesh
+    radio won't function. Because the ESP32 board variant is not fixed here, the
+    operator selects the Meshtastic device variant for their actual board via
+    QUIVER_MESHTASTIC_VARIANT (e.g. tlora-v2-1-1.6, tbeam, tlora-v2). Without it,
+    prepare_fn aborts BEFORE the confirm rather than guessing."""
+    state = {}
+    dest = get_firmware_dir("esp32d") / "meshtastic"
+    variant = os.environ.get("QUIVER_MESHTASTIC_VARIANT", "").strip()
+
+    def prep():
+        if not variant:
+            err("  Meshtastic needs a board VARIANT — the generic ESP32-D has no")
+            err("  fixed LoRa hardware. Set QUIVER_MESHTASTIC_VARIANT to your board's")
+            err("  Meshtastic variant (e.g. tlora-v2-1-1.6, tbeam, tlora-v2) and re-run.")
+            err("  NOTE: Meshtastic also requires an attached SX127x/SX126x LoRa radio.")
+            return False
+        pat = rf"firmware-{variant}-(?!.*update)(?!.*tft)(?!.*inkhud)[^/]*\.bin"
+        binf = _download_release_asset(MESHTASTIC_OWNER, MESHTASTIC_REPO, [pat], dest,
+                                       f"Meshtastic firmware ({variant})")
+        if not binf:
+            err(f"  Could not fetch the Meshtastic '{variant}' firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MESHTASTIC_OWNER}/{MESHTASTIC_REPO}/releases for the exact variant slug.")
+            return False
+        state["fw"] = binf
+        ok(f"  Meshtastic firmware ready: {binf.name}")
+        return True
+
+    def flash():
+        # Meshtastic ESP32 device-install: erase then write the factory image at 0x0.
+        _run_esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                      "erase_flash"], timeout=60)
+        _run_esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                      "write_flash", "--flash_mode", "dio", "--flash_size", "detect",
+                      "0x0", str(state["fw"])], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash Meshtastic"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME} (requires an attached SX127x/SX126x LoRa radio)",
+            f"Firmware : Meshtastic {variant or '<set QUIVER_MESHTASTIC_VARIANT>'} "
+            f"({MESHTASTIC_OWNER}/{MESHTASTIC_REPO}) → erase + 0x0",
+            f"Port     : {port}",
+        ],
+    )
+
+
+def _dispatch_firmware_payload(fw, port):
+    name = fw.get("firmware", "")
+    if name == "Marauder":
+        _run_marauder_payload(fw, port)
+    elif name == "Meshtastic":
+        _run_meshtastic_payload(fw, port)
+    elif name == "Application":
+        _run_app_payload(fw, port)
+    elif name == "PartitionSet":
+        _run_partition_payload(fw, port)
+    else:
+        err(f"Unknown firmware payload '{name}' for {TOOL_NAME}.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -496,6 +721,12 @@ def main():
 
     ok(f"ESP32-D detected on {port}")
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [

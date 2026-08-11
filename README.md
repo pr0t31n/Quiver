@@ -244,6 +244,23 @@ injection:
 
 Each device has a payload library — named scripts stored under `payloads/<device>/` and indexed in `payloads/payloads.json`. Select a payload from the device page; it is passed to the device script via `QUIVER_SELECTED_PAYLOAD`.
 
+### Firmware-flash payloads (`FIRMWARE - …`)
+
+68 firmware payloads across 34 devices flash firmware straight from the device page with **no interactive menu**: device info → PREPARE (download/install/build) → summary → a single "Are you sure?" → flash. This includes multi-firmware selectors — Flipper Zero (Official / Unleashed / RogueMaster / Momentum), ESP32 **Marauder**, **Meshtastic** (Heltec/LilyGo LoRa), Zigbee coordinator/router/sniffer (cc2531, Sonoff-E, T-Zigbee), Pico Ducky / MicroPython / CircuitPython (RP2040), Proxmark Iceman, Sniffle/nRF-Sniffer, and each RF/SDR/debug board's stock firmware. See the `.qfw` descriptors under `payloads/<device>/firmware/`.
+
+### Community payloads (importer)
+
+The canonical, publicly-maintained payload collections for the Hak5 and hardware devices are not bundled — pull them on demand with the importer, which clones each upstream repo into `payloads/<device>/community/` and indexes it into `payloads.json`:
+
+```bash
+cd payloads
+python3 import_community_payloads.py            # all registered devices
+python3 import_community_payloads.py --list     # show the repo registry
+python3 import_community_payloads.py --tools flipper_zero,key_croc
+```
+
+It is idempotent (`git pull` on re-run, de-duplicated index) and covers Bash Bunny, USB Rubber Ducky, O.MG, Packet Squirrel, Shark Jack, Signal Owl, LAN Turtle, Key Croc, and Flipper Zero. Content belongs to the upstream maintainers and is fetched at run time.
+
 ### Built-in Payloads
 
 **Bash Bunny:**

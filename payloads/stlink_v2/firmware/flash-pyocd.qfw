@@ -1,0 +1,1 @@
+{"type":"firmware_flash","board":"ST-Link V2","firmware":"pyocd","label":"Flash Firmware (.hex/.elf) via pyocd"}

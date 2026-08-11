@@ -57,6 +57,7 @@ from common import (
     web_detect_loop, run_streaming,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload, get_firmware_dir,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -736,6 +737,61 @@ def check_firmware_version(port: str):
         warn("Could not reach GitHub for version check.")
 
 
+# ── Firmware payload (main-page "FIRMWARE - ") ────────────────────────────────
+
+def _fw_user_dir() -> Path:
+    d = get_firmware_dir("photon_2") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _run_dfu_payload(fw, port):
+    state = {}
+
+    def prep():
+        if not _check_particle_cli():
+            err("  Particle CLI not available — DFU flashing requires it.")
+            return False
+        d = _fw_user_dir()
+        bins = sorted(d.glob("*.bin"))
+        f = bins[0] if bins else None
+        if not f:
+            err("  No firmware .bin found. Compile a Photon 2 (platform 'p2') image via")
+            err("  Particle Workbench / 'particle compile', or download a Device OS user")
+            err(f"  application .bin, and drop it into: {d}")
+            return False
+        state["fw"] = f
+        # Prefer the DFU-mode port if the device is already in DFU.
+        state["port"] = find_serial_port_by_vidpid(VID_PID_DFU) or port
+        ok(f"  Firmware ready: {f}")
+        return True
+
+    def flash():
+        fw_path = state["fw"]
+        flash_port = state["port"]
+        info(f"Flashing {Path(fw_path).name} using 'particle flash --usb'…")
+        try:
+            r = run(f"particle flash --usb {fw_path} --port {flash_port}")
+            if r.returncode == 0:
+                ok("DFU firmware flash completed successfully.")
+            else:
+                err("DFU flash failed. Ensure the device is in DFU mode (blinking magenta):")
+                err("  hold MODE ~3s until the LED blinks magenta, then re-run.")
+        except FileNotFoundError:
+            err("Particle CLI not found. Install with: npm install -g particle-cli")
+
+    run_firmware_payload(
+        fw.get("label", "Flash firmware (DFU)"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            "Firmware : operator-supplied Photon 2 (.bin) via Particle DFU",
+            f"Port     : {port}",
+        ],
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -795,6 +851,12 @@ def main():
     _check_dialout(port)
 
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _run_dfu_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Device Info (particle identify)",

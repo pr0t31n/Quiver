@@ -49,6 +49,12 @@
       "description": "DuckyScript 3.0 payload for the USB Rubber Ducky (2022). Uses PASSIVE_WINDOWS_DETECT, then injects CTRL+SHIFT+ENTER after Win+R to request elevation, accepts UAC with ALT+Y. Downloads PrivescAudit-Windows.ps1 from $SERVER:$PORT and executes it in an elevated hidden PowerShell session. Includes a 120-second DELAY after injection to allow the audit to complete before typing 'exit'. JITTER_ENABLED TRUE with JITTER_MAX 30ms. Must be compiled to inject.bin with Payload Studio before deployment.",
       "path": "payloads/usb_rubber_ducky/privesc-windows-quick/payload.txt",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash legacy v1 firmware (Atmel DFU)",
+      "description": "Flashes the ORIGINAL v1 USB Rubber Ducky (Atmel AT32UC3 behind an Atmel DFU bootloader) via dfu-programmer. The 2022 model is NOT flashable (flashing bricks it), so PREPARE requires a legacy DFU device (VID 03EB) AND an operator-supplied .hex/.bin image, aborting BEFORE the confirmation if either is missing.",
+      "path": "payloads/usb_rubber_ducky/firmware/legacy-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "wifi_pineapple": [
@@ -229,6 +235,24 @@
       "description": "Proxmark3 script for cloning HID Prox (26-bit Wiegand) and HID Corporate 1000 access cards to a T5577 writable blank. Reads the source card with 'lf hid reader' to extract the Facility Code (FC) and Card Number (CN). Clones using 'lf hid clone --fc [FC] --cn [CN]'. Performs a post-clone verification read to confirm the T5577 emits the correct FC/CN combination. Supports HID H10301 (standard 26-bit), H10302, H10304, and Corporate 1000 (35-bit) card formats. Logs the FC, CN, raw bit string, and clone verification result.",
       "path": "payloads/proxmark3/rfid-hid-clone.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash All (bootrom + fullimage)",
+      "description": "Flash the Iceman (RfidResearchGroup/proxmark3) firmware via pm3-flash-all. Firmware binaries are bundled by the proxmark3 apt package; prepare ensures the flash utility is installed; flash reuses the existing pm3-flash writer.",
+      "path": "payloads/proxmark3/firmware/flash-all.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Bootrom only",
+      "description": "Flash only the Iceman bootrom via pm3-flash-bootrom (apt-bundled firmware). Reuses the existing pm3-flash writer.",
+      "path": "payloads/proxmark3/firmware/flash-bootrom.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Full Image only",
+      "description": "Flash only the Iceman full image via pm3-flash-fullimage (apt-bundled firmware). Reuses the existing pm3-flash writer.",
+      "path": "payloads/proxmark3/firmware/flash-fullimage.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "hackrf_one": [
@@ -261,6 +285,12 @@
       "description": "HackRF One script for passive GSM base station enumeration using grgsm_scanner. Scans GSM 900 (880-960 MHz), DCS 1800 (1710-1880 MHz), and PCS 1900 (1850-1990 MHz) bands. For each detected ARFCN, decodes the BCCH broadcast channel to extract: MCC (Mobile Country Code), MNC (Mobile Network Carrier), LAC (Location Area Code), Cell ID, BSIC, and signal power. Writes results to a CSV file. Useful for characterizing the cellular RF environment and identifying the carrier infrastructure present at a target location. Requires grgsm_scanner (gr-gsm package) installed.",
       "path": "payloads/hackrf_one/hackrf-gsm-survey.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Firmware Update (hackrf_spiflash)",
+      "description": "Auto-flash the stock HackRF One firmware over SPI flash. Prepare downloads hackrf_one_usb.bin from the greatscottgadgets/hackrf release; flash reuses hackrf_spiflash -w. NOTE: PortaPack Mayhem is a separate device/firmware and is not handled here.",
+      "path": "payloads/hackrf_one/firmware/flash-stock.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "ubertooth_one": [
@@ -281,6 +311,12 @@
       "description": "Ubertooth One script that uses ubertooth-specan to perform a continuous 2.4 GHz spectrum analysis sweep across the entire 2.402-2.480 GHz ISM band. Captures signal level data with the -l flag and writes time-series RSSI measurements per channel to a CSV. Post-processes to identify the busiest channels and generate a channel utilization heatmap. Useful for RF interference analysis, identifying non-standard 2.4 GHz protocols (Zigbee, Z-Wave 2.4 GHz, proprietary ISM devices), and characterizing the RF environment before Bluetooth or WiFi attacks.",
       "path": "payloads/ubertooth_one/ubertooth-spectrum.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Firmware Update (ubertooth-dfu)",
+      "description": "Auto-flash the Ubertooth One firmware. Prepare downloads the .dfu image (bluetooth_rxtx.dfu) from the greatscottgadgets/ubertooth release firmware zip; flash reuses the existing ubertooth-util -f then ubertooth-dfu writer.",
+      "path": "payloads/ubertooth_one/firmware/flash-ubertooth.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "yardstick_one": [
@@ -307,6 +343,12 @@
       "description": "Python rfcat script for detecting RF jamming activity on a monitored frequency. Polls RSSI on the configured frequency every 50ms and maintains a rolling window of the last N samples. If more than 90% of samples in the window exceed a high-power threshold (indicating sustained jamming), triggers an alert with timestamp, frequency, and sustained RSSI level. Logs all events to a file and optionally prints to stdout. Useful for verifying that RF monitoring systems or alarm sensors remain operational in the presence of jamming, or for detecting jamming attacks against target infrastructure during authorized assessments.",
       "path": "payloads/yardstick_one/yardstick-jamming-detect.py",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash RfCat firmware (CC-Bootloader)",
+      "description": "Flash the RfCat CC1111 firmware via rfcat's CC-Bootloader client (rfcat_bootloader <port> download <hex>). Flash puts the device into bootloader mode then writes. RfCat firmware has no reliable release asset, so prepare locates an operator-supplied .hex and aborts before confirm if absent.",
+      "path": "payloads/yardstick_one/firmware/flash-rfcat.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "bus_pirate_5": [
@@ -333,6 +375,12 @@
       "description": "Bus Pirate 5 script for JTAG Test Access Port (TAP) discovery and IDCODE reading. Attempts OpenOCD first with the buspirate interface adapter at the configured JTAG TCK/TDI/TDO/TMS pins, using the IDCODE instruction to identify connected devices in the JTAG chain. Falls back to urjtag (jtag command-line) if OpenOCD is unavailable. Parses the 32-bit IDCODE to extract manufacturer ID (bits [11:1]), part number (bits [27:12]), and version (bits [31:28]). Logs all discovered TAPs and their decoded identities. Serves as the first step in JTAG-based firmware extraction or debug access.",
       "path": "payloads/bus_pirate_5/buspirate-jtag-idcode.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Firmware Update (.uf2)",
+      "description": "Auto-flashes Bus Pirate 5 firmware via the RP2040 UF2 bootloader. prepare_fn sends '$' to enter BOOTSEL, waits for the RPI-RP2 volume, and obtains the .uf2 (operator-supplied via QUIVER_BP5_UF2 / the tool's firmware dir, or downloaded from the official DangerousPrototypes/BusPirate5-firmware release when QUIVER_BP5_REV names the board revision). flash_fn copies the .uf2 to the mounted volume. Source: github.com/DangerousPrototypes/BusPirate5-firmware.",
+      "path": "payloads/bus_pirate_5/firmware/flash-uf2.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "cynthion": [
@@ -353,6 +401,18 @@
       "description": "Python Facedancer script that emulates a USB Mass Storage device (BOT/SCSI) via the Cynthion, presenting a 64MB FAT32 disk image to the host. The disk image contains an AUTORUN.INF file and a test.bat script for Windows autorun testing (verifying whether Windows autorun/autoplay policies are enforced). Also demonstrates custom SCSI command handling for testing how host drivers respond to vendor-specific commands. The disk image file path and contents are fully configurable. Useful for testing USB device policy enforcement, DLP solutions, and endpoint protection products.",
       "path": "payloads/cynthion/facedancer-mass-storage.py",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update Firmware (MCU + FPGA)",
+      "description": "Updates both the Apollo SAMD21 MCU firmware and the ECP5 FPGA bitstream via 'cynthion update'. prepare_fn ensures the cynthion/apollo-fpga tooling (which carries and fetches the images) is installed and the device is on the CONTROL port; flash_fn reuses the module's cynthion-update helper. Source: Great Scott Gadgets cynthion.",
+      "path": "payloads/cynthion/firmware/update-mcu-fpga.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update MCU Firmware Only",
+      "description": "Updates only the Apollo SAMD21 MCU firmware (no FPGA bitstream) via 'cynthion update --mcu-firmware'. Same prepare_fn (tooling + CONTROL-port checks); flash_fn reuses the module's cynthion-update helper. Source: Great Scott Gadgets cynthion.",
+      "path": "payloads/cynthion/firmware/update-mcu-only.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "greatfet_one": [
@@ -367,6 +427,12 @@
       "description": "GreatFET One script for dumping microcontroller firmware via the SWD (Serial Wire Debug) interface using pyocd. Attempts to dump the primary flash region starting at 0x08000000 for 512KB (common STM32 configuration), falling back to 0x00000000 if the primary address fails (ARM Cortex-M systems that mirror flash at 0). Also dumps SRAM starting at 0x20000000 for forensic memory analysis. Computes MD5 hashes of all dumped regions. Output saved as separate .bin files per memory region. Requires the GreatFET to be connected via SWD to the target's SWDIO and SWDCLK pins with a shared GND.",
       "path": "payloads/greatfet_one/greatfet-swd-dump.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update Firmware",
+      "description": "Reflashes GreatFET One firmware to match the installed greatfet Python package via 'gf fw --auto' (DFU), falling back to 'greatfet firmware --autoflash'. prepare_fn ensures the greatfet CLI (which carries the matching image) is installed and the device is present. Source: Great Scott Gadgets greatfet.",
+      "path": "payloads/greatfet_one/firmware/update-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "debug_probes": [
@@ -459,6 +525,12 @@
       "description": "Chameleon Ultra script that enumerates all 8 emulation slots and reports the current configuration of each. For each slot, queries: tag type (MIFARE Classic 1K/4K, MIFARE Ultralight, NTAG213/215/216, EM4100, or empty), UID (if a card is loaded), and enabled/disabled status via slot_enable(). Outputs a formatted table for quick operator reference of what is loaded in each slot before a physical access engagement. Useful as a pre-engagement checklist to confirm the correct card is in the correct slot.",
       "path": "payloads/chameleon_ultra/chameleon-slot-survey.sh",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Firmware Update",
+      "description": "Auto-flash the official ChameleonUltra firmware. Prepare installs nrfutil, downloads the Ultra DFU app .zip from RfidResearchGroup/ChameleonUltra releases, and waits for DFU mode (1915:521F); flash reuses the existing nrfutil DFU writer.",
+      "path": "payloads/chameleon_ultra/firmware/flash-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "flipper_zero": [
@@ -473,6 +545,30 @@
       "description": "Flipper Zero BadUSB payload in DuckyScript 1.0 syntax targeting macOS 12+. Opens Spotlight (GUI SPACE), types 'Terminal', and presses ENTER to launch a Terminal window. Waits 1.5 seconds for Terminal to open, then types a single-line curl command that downloads SysAudit_macos.sh from the attacker HTTP server (172.16.84.1:8080) and pipes it directly to bash, redirecting output to /tmp/sysaudit_out.txt. A second curl command POSTs the results file back to the /upload endpoint. Uses DuckyScript 1.0 uppercase syntax compatible with the Flipper Zero BadUSB app.",
       "path": "payloads/flipper_zero/badusb-sysaudit-mac/payload.txt",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Official",
+      "description": "Fetches the latest official Flipper Zero web-updater package (.tgz) from GitHub releases (flipperdevices/flipperzero-firmware), extracts it in prepare_fn, then applies it via the module's existing SD update flow: uploads to /ext/update/ and issues flipper.update.install over RPC.",
+      "path": "payloads/flipper_zero/firmware/official.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Unleashed",
+      "description": "Fetches the latest Unleashed custom-firmware web-updater package (.tgz) from GitHub releases (DarkFlippers/unleashed-firmware), stages it in prepare_fn, then flashes via the existing SD update-package flow (flipper.update.install over RPC).",
+      "path": "payloads/flipper_zero/firmware/unleashed.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - RogueMaster",
+      "description": "Fetches the latest RogueMaster custom-firmware web-updater package (.tgz) from GitHub releases (RogueMaster/flipperzero-firmware-wPlugins), stages it in prepare_fn, then flashes via the existing SD update-package flow (flipper.update.install over RPC).",
+      "path": "payloads/flipper_zero/firmware/roguemaster.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Momentum",
+      "description": "Fetches the latest Momentum custom-firmware web-updater package (.tgz) from GitHub releases (Next-Flip/Momentum-Firmware, the successor to Xtreme), stages it in prepare_fn, then flashes via the existing SD update-package flow (flipper.update.install over RPC).",
+      "path": "payloads/flipper_zero/firmware/momentum.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "wifi_duck": [
@@ -493,6 +589,18 @@
       "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting macOS 12+. Opens Spotlight (gui SPACE), types 'Terminal', and presses enter to launch a Terminal window. After a 1.5-second delay, types a curl one-liner that downloads SysAudit_macos.sh from the attacker HTTP server (172.16.84.1:8080) and pipes it to bash, redirecting stdout and stderr to /tmp/sa_out.txt. A second curl POSTs the results file to the /upload endpoint. WiFi Duck provides wireless triggering of the payload via its web UI at http://192.168.4.1.",
       "path": "payloads/wifi_duck/sysaudit-mac/payload.txt",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash WiFi Duck ESP8266 (esptool)",
+      "description": "Flashes the official WiFi Duck firmware to the ESP8266 half over a wired USB-UART. PREPARE downloads the release esp8266 .bin, ensures esptool, and resolves the ESP serial port (aborts BEFORE the confirmation if unavailable); flash runs 'esptool --chip esp8266 write_flash 0x0'. Source: github.com/SpacehuhnTech/WiFiDuck.",
+      "path": "payloads/wifi_duck/firmware/wifi-duck-esptool.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update WiFi Duck ESP8266 (OTA)",
+      "description": "Reuses the module's existing HTTP OTA path for the ESP8266 half. PREPARE downloads the release esp8266 .bin and verifies http://192.168.4.1 is reachable over the wifiduck AP (aborts BEFORE the confirmation if not); flash POSTs the .bin to /update. Source: github.com/SpacehuhnTech/WiFiDuck.",
+      "path": "payloads/wifi_duck/firmware/wifi-duck-ota.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "other": [
@@ -617,6 +725,30 @@
       "description": "MicroPython script using ubluetooth to perform a passive BLE advertisement scan. Collects device address, RSSI, and raw advertisement data for 10 seconds, then prints a summary table. Upload via mpremote.",
       "path": "payloads/esp32d/ble-scanner/ble_scan.py",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Application Firmware (merged .bin -> 0x10000)",
+      "description": "Wires the existing esptool app-flash. prepare_fn locates an operator-supplied app.bin under firmware/esp32d/user/ (aborts before confirm if absent); flash writes it at 0x10000 via the module's esptool flow.",
+      "path": "payloads/esp32d/firmware/flash-app-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Full Partition Set",
+      "description": "Wires the existing 4-file esptool flash. prepare_fn requires bootloader/partitions/boot_app0/app.bin in firmware/esp32d/user/; flash writes 0x1000/0x8000/0xe000/0x10000.",
+      "path": "payloads/esp32d/firmware/flash-partition-set.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ESP32 Marauder",
+      "description": "ESP32 Marauder from justcallmekoko/ESP32Marauder. prepare_fn downloads the generic ESP32 release .bin (plus bootloader/partitions/boot_app0 if present); flash writes the full set, else firmware-only at 0x10000.",
+      "path": "payloads/esp32d/firmware/flash-marauder.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Meshtastic (ESP32 + LoRa)",
+      "description": "Flashes Meshtastic (meshtastic/firmware) to an ESP32 that has an attached SX127x/SX126x LoRa radio. Generic ESP32-D has no LoRa, so set QUIVER_MESHTASTIC_VARIANT to your board's Meshtastic variant (e.g. tlora-v2-1-1.6, tbeam); prepare_fn aborts before the confirm if unset. Downloads the variant factory .bin and does an esptool erase + write at 0x0.",
+      "path": "payloads/esp32d/firmware/flash-meshtastic.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "rpi_pico": [
@@ -631,6 +763,24 @@
       "description": "MicroPython DuckyScript interpreter for Raspberry Pi Pico. Parses a payload.txt file from the Pico filesystem and executes HID keyboard injection commands. Supports: STRING, DELAY, ENTER, GUI, CTRL, ALT, SHIFT, TAB, UP/DOWN/LEFT/RIGHT arrows. Upload payload.txt and main.py via mpremote.",
       "path": "payloads/rpi_pico/ducky-runner/main.py",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (UF2)",
+      "description": "Auto-flashes MicroPython to the Raspberry Pi Pico (RP2040) with NO menu: device info, PREPARE (scrapes micropython.org for the latest RPI_PICO UF2 and downloads it), summary, single confirm, then writes by copying the .uf2 to the RPI-RP2 BOOTSEL drive.",
+      "path": "payloads/rpi_pico/firmware/micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash CircuitPython (UF2)",
+      "description": "Auto-flashes Adafruit CircuitPython to the Pico. PREPARE downloads the latest stable UF2 from circuitpython.org/board/raspberry_pi_pico/; flash copies it to the RPI-RP2 BOOTSEL drive.",
+      "path": "payloads/rpi_pico/firmware/circuitpython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Pico Ducky (CircuitPython + payload)",
+      "description": "Turns the Pico into a CircuitPython USB Rubber Ducky (dbisu/pico-ducky). PREPARE downloads the CircuitPython UF2 plus the pico-ducky US release package; flash writes CircuitPython to RPI-RP2, waits for the CIRCUITPY drive, then copies the pico-ducky lib/ + code files + payload.dd.",
+      "path": "payloads/rpi_pico/firmware/pico-ducky.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "rpi_pico_w": [
@@ -645,6 +795,24 @@
       "description": "Pico W MicroPython payload that injects keystrokes to execute a PowerShell/bash system audit command on the target, then collects and exfiltrates results over the Pico W's WiFi connection to a remote listener. Configurable target OS detection, WiFi credentials, and exfil endpoint.",
       "path": "payloads/rpi_pico_w/wireless-sysaudit/main.py",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (Pico W UF2)",
+      "description": "Auto-flashes the Pico W MicroPython build (with WiFi) with NO menu. PREPARE scrapes micropython.org for the latest RPI_PICO_W UF2; flash copies it to the RPI-RP2 BOOTSEL drive.",
+      "path": "payloads/rpi_pico_w/firmware/micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash CircuitPython (Pico W UF2)",
+      "description": "Auto-flashes the Pico W CircuitPython build. PREPARE downloads the latest UF2 from circuitpython.org/board/raspberry_pi_pico_w/; flash copies it to the RPI-RP2 BOOTSEL drive.",
+      "path": "payloads/rpi_pico_w/firmware/circuitpython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Pico Ducky (CircuitPython + payload)",
+      "description": "Turns the Pico W into a CircuitPython USB Rubber Ducky (dbisu/pico-ducky). PREPARE downloads the CircuitPython UF2 + pico-ducky US package; flash writes CircuitPython to RPI-RP2, then copies the pico-ducky files to the CIRCUITPY drive.",
+      "path": "payloads/rpi_pico_w/firmware/pico-ducky.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "rpi_pico_2w": [
@@ -653,6 +821,24 @@
       "description": "Same as Pico DuckyScript runner but compiled for RP2350 (Pico 2W). MicroPython DuckyScript interpreter that reads payload.txt from the filesystem and executes USB HID keyboard injection. Takes advantage of RP2350's faster USB enumeration.",
       "path": "payloads/rpi_pico_2w/ducky-runner/main.py",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (Pico 2W / RP2350 UF2)",
+      "description": "Auto-flashes the RP2350 Pico 2W MicroPython build with NO menu. PREPARE scrapes micropython.org for the latest RPI_PICO2_W UF2; flash copies it to the RPI-RP2350 BOOTSEL drive (RP2350, not RPI-RP2).",
+      "path": "payloads/rpi_pico_2w/firmware/micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash CircuitPython (Pico 2W UF2)",
+      "description": "Auto-flashes the Pico 2W CircuitPython build. PREPARE downloads the latest UF2 from circuitpython.org/board/raspberry_pi_pico2_w/; flash copies it to the RPI-RP2350 BOOTSEL drive.",
+      "path": "payloads/rpi_pico_2w/firmware/circuitpython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Pico Ducky (CircuitPython + payload)",
+      "description": "Turns the Pico 2W into a CircuitPython USB Rubber Ducky (dbisu/pico-ducky). PREPARE downloads the Pico 2W CircuitPython UF2 + pico-ducky US package; flash writes CircuitPython to RPI-RP2350, then copies the pico-ducky files to CIRCUITPY.",
+      "path": "payloads/rpi_pico_2w/firmware/pico-ducky.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "nordic_nrf52840": [
@@ -711,6 +897,30 @@
       "description": "MicroPython payload for T-Deck that performs WiFi network discovery and displays results on the built-in screen with navigation via the trackball. Shows SSIDs, BSSIDs, channels, signal strength, and encryption types. Saves scan results to SD card if inserted.",
       "path": "payloads/lilygo_tdeck/network-recon/main.py",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Application Firmware (.bin -> 0x0)",
+      "description": "Wires the existing ESP32-S3 merged-image esptool flash (0x0, qio). prepare_fn locates operator app.bin under firmware/lilygo_tdeck/user/.",
+      "path": "payloads/lilygo_tdeck/firmware/flash-app-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (ESP32-S3)",
+      "description": "Wires the existing MicroPython flow. prepare_fn locates an operator ESP32-S3 MicroPython .bin; flash erases then writes at 0x0.",
+      "path": "payloads/lilygo_tdeck/firmware/flash-micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ESP32 Marauder (S3)",
+      "description": "ESP32 Marauder from justcallmekoko/ESP32Marauder (ESP32-S3 build). prepare_fn downloads the S3 release .bin (+support bins if present); flash writes full set or firmware-only at 0x10000.",
+      "path": "payloads/lilygo_tdeck/firmware/flash-marauder.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Meshtastic (t-deck)",
+      "description": "Meshtastic from meshtastic/firmware (t-deck variant). prepare_fn downloads firmware-t-deck-*.bin; flash erases then writes the factory image at 0x0 (esptool, ESP32-S3).",
+      "path": "payloads/lilygo_tdeck/firmware/flash-meshtastic.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "badusb": [
@@ -731,6 +941,24 @@
       "description": "DuckyScript payload for BadUSB targeting macOS. Injects keystrokes to open Terminal (Cmd+Space → Terminal), then runs a system information collection one-liner that dumps hostname, user, IP, and running processes to a hidden file in /tmp. Configurable exfil endpoint.",
       "path": "payloads/badusb/macos-sysinfo/payload.txt",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Program DigiSpark (micronucleus)",
+      "description": "Wires the module's existing DigiSpark flow as a no-menu payload. PREPARE installs micronucleus and locates an operator-supplied compiled ATtiny85 .hex (aborts BEFORE the confirmation if absent); flash runs 'micronucleus --run'. No auto-source firmware exists for BadUSB (operator compiles the sketch).",
+      "path": "payloads/badusb/firmware/digispark.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Program Arduino Micro / Pro Micro (avrdude)",
+      "description": "Wires the module's existing ATmega32U4 flow as a no-menu payload. PREPARE installs avrdude, locates an operator-supplied .hex, and resolves the board serial port (aborts BEFORE the confirmation if any is missing); flash triggers the Caterina bootloader via a 1200-baud pulse then runs avrdude (avr109).",
+      "path": "payloads/badusb/firmware/arduino.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Compile & flash Arduino sketch (.ino)",
+      "description": "Locally compiles a selected Arduino sketch (.ino) to a .hex with arduino-cli — auto-installing the correct board core (DigiSpark digistump / Arduino Micro / SparkFun Pro Micro; board auto-detected or QUIVER_BADUSB_BOARD) — then flashes via micronucleus (DigiSpark) or avrdude avr109 (ATmega32U4). Sketch comes from the selected payload, the firmware dir, or public repos imported via import_community_payloads.py --tools badusb.",
+      "path": "payloads/badusb/firmware/compile-sketch.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "evil_crow": [
@@ -751,6 +979,18 @@
       "description": "Evil Crow RF configuration for scanning the 2.4 GHz band for vulnerable wireless keyboards and mice using the nRF24L01+ module. Implements the MouseJack vulnerability scanner (CVE-2016-10761). Identifies unencrypted wireless HID devices within range. For research use in authorized environments only.",
       "path": "payloads/evil_crow/mousejack-scan/config.json",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update Firmware (esptool via USB)",
+      "description": "Wires the existing merged-image esptool flash. prepare_fn auto-sources a .bin from joelsernamoreno/EvilCrowRF-V2 releases (or an operator .bin in firmware/evil_crow/user/); flash writes merged image at 0x0.",
+      "path": "payloads/evil_crow/firmware/flash-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ESP32 Marauder",
+      "description": "ESP32 Marauder from justcallmekoko/ESP32Marauder (generic ESP32 build). prepare_fn downloads the release .bin (+support bins if present); flash uses full set or firmware-only at 0x10000.",
+      "path": "payloads/evil_crow/firmware/flash-marauder.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "cc2531": [
@@ -765,6 +1005,18 @@
       "description": "Configuration script and instructions for setting up Zigbee2MQTT with the CC2531 coordinator dongle. Generates a zigbee2mqtt configuration.yaml with Z-Stack port, network key, and MQTT broker settings. Includes instructions for installing Zigbee2MQTT via npm on Linux/macOS and connecting to an MQTT broker.",
       "path": "payloads/cc2531/zigbee2mqtt-setup/setup.sh",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Z-Stack Coordinator (Zigbee2MQTT)",
+      "description": "Flash the Z-Stack coordinator firmware via cc-tool + CC Debugger. Prepare installs cc-tool and downloads CC2531ZNP-Pro-Secure_LinkKeyJoin.hex from Koenkk/Z-Stack-firmware; flash reuses cc-tool -e -w <hex> -v. (cc-tool is Linux-only.)",
+      "path": "payloads/cc2531/firmware/flash-coordinator.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Zigbee Sniffer firmware",
+      "description": "Flash the Zigbee sniffer firmware via cc-tool + CC Debugger. Prepare installs cc-tool and downloads the sniffer .hex from Koenkk/Z-Stack-firmware (falls back to an operator image if the path 404s); flash reuses cc-tool -e -w <hex> -v.",
+      "path": "payloads/cc2531/firmware/flash-sniffer.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "dwm3001cdk": [
@@ -773,6 +1025,18 @@
       "description": "Two-Way Ranging (TWR) demo configuration for DWM3001CDK. Configures the DW3110 UWB transceiver for IEEE 802.15.4z HRP UWB ranging. Measures distance between two DWM3001CDK nodes. Outputs ranging results over serial CDC at 115200 baud. Requires two DWM3001CDK units — one as initiator, one as responder.",
       "path": "payloads/dwm3001cdk/uwb-ranging/config.json",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash via J-Link (nrfjprog)",
+      "description": "Flash Qorvo UWB firmware to the nRF52833 via the onboard J-Link. Prepare ensures nrfjprog + J-Link and locates an operator-supplied .hex (Qorvo firmware is behind a registration wall), aborting before confirm if absent; flash reuses nrfjprog --program -f NRF52 --sectorerase.",
+      "path": "payloads/dwm3001cdk/firmware/flash-jlink.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash via DFU (nrfutil)",
+      "description": "Flash Qorvo UWB firmware to the nRF52833 via USB CDC DFU. Prepare ensures nrfutil + the CDC port and locates an operator-supplied DFU .zip, aborting before confirm if absent; flash reuses nrfutil dfu usb-serial.",
+      "path": "payloads/dwm3001cdk/firmware/flash-dfu.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "photon_2": [
@@ -781,11 +1045,30 @@
       "description": "Particle firmware sketch for Photon 2 that reads ADC inputs and publishes sensor data to the Particle cloud every 30 seconds. Configures the RTL8721DM WiFi and connects to Particle cloud using the Device OS API. Data is viewable in the Particle console at console.particle.io. Flash via particle flash --usb.",
       "path": "payloads/photon_2/sensor-logger/firmware.ino",
       "added": "2026-03-28T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Firmware (DFU)",
+      "description": "Wires the existing Particle DFU flash. prepare_fn ensures the Particle CLI and locates an operator Photon 2 (.bin) under firmware/photon_2/user/; flash runs 'particle flash --usb'. No custom CFW.",
+      "path": "payloads/photon_2/firmware/flash-dfu.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ],
   "omg_cable": [],
   "wifi_coconut": [],
-  "rubber_ducky_3": [],
+  "rubber_ducky_3": [
+    {
+      "name": "FIRMWARE - Flash Hak5 Ducky firmware",
+      "description": "Auto-flashes the official Hak5 USB Rubber Ducky firmware to the RP2040-based Ducky 3 with NO menu. PREPARE resolves/downloads the release ducky.uf2 (falls back to an operator-supplied .uf2 in the firmware dir); flash writes it to the RPI-RP2 bootloader drive. Source: github.com/hak5/usb-rubber-ducky.",
+      "path": "payloads/rubber_ducky_3/firmware/hak5-ducky.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Pico Ducky (CircuitPython + payload)",
+      "description": "Alternative firmware: reflashes the Ducky 3's RP2040 as a CircuitPython pico-ducky. PREPARE downloads the CircuitPython UF2 + pico-ducky US package; flash writes CircuitPython to RPI-RP2, then copies the pico-ducky files to CIRCUITPY. Source: github.com/dbisu/pico-ducky.",
+      "path": "payloads/rubber_ducky_3/firmware/pico-ducky.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
   "cc26x2r1": [
     {
       "name": "FIRMWARE - Flash Sniffle firmware",
@@ -816,6 +1099,128 @@
       "description": "Reflashes the Adafruit Bluefruit LE Sniffer (#2269, nRF51822) over an EXTERNAL SWD programmer (no DFU/USB path exists on this board). Runs with NO interactive menu: device info, PREPARE (locate the operator-supplied nRF51 sniffer hex under the firmware dir, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before writing. Requires SWD wiring (SWDIO/SWCLK/GND/VTref) and an nRF51 firmware image — if either is missing, prep aborts BEFORE the confirmation.",
       "path": "payloads/bluefruit_le_sniffer/firmware/reflash-firmware.qfw",
       "added": "2026-08-10T00:00:00Z"
+    }
+  ],
+  "bus_pirate_36": [
+    {
+      "name": "FIRMWARE - Firmware Update (pirate-loader)",
+      "description": "Auto-flashes a Bus Pirate v3.x Intel HEX via pirate-loader over the PIC24 bootloader. prepare_fn locates the .hex (operator-supplied via QUIVER_BP36_HEX / firmware dir, or downloaded from the BusPirate/Bus_Pirate release when QUIVER_BP36_ASSET selects the variant) and builds/finds pirate-loader. flash_fn enters the bootloader and runs pirate-loader. Source: github.com/BusPirate/Bus_Pirate.",
+      "path": "payloads/bus_pirate_36/firmware/flash-pirate-loader.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "nucleo_f429zi": [
+    {
+      "name": "FIRMWARE - Flash Firmware (.hex/.elf) via pyocd",
+      "description": "Flashes the companion Click firmware onto the STM32F429ZI via pyocd FileProgrammer (target stm32f429zi), reusing the module's existing _flash_firmware(). prepare_fn locates the operator-supplied image (.bin/.hex/.elf via QUIVER_CLICK_FW or the tool's firmware dir) and aborts before the confirmation if none is present.",
+      "path": "payloads/nucleo_f429zi/firmware/flash-pyocd.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Firmware (.bin) via st-flash",
+      "description": "Flashes the companion Click firmware .bin at 0x08000000 via st-flash (stlink-tools). prepare_fn ensures st-flash is installed and locates the operator-supplied .bin (QUIVER_CLICK_FW / firmware dir), aborting before confirm if absent.",
+      "path": "payloads/nucleo_f429zi/firmware/flash-stflash.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "stlink_v2": [
+    {
+      "name": "FIRMWARE - Flash Firmware (.bin) via st-flash",
+      "description": "Flashes an operator-supplied target .bin at 0x08000000 via st-flash. prepare_fn ensures st-flash is present and locates the image (QUIVER_STLINK_FW / firmware dir), aborting before the confirmation if none is found. Note: the ST-Link probe's OWN firmware (STSW-LINK007) is Windows/Java-GUI only and is NOT flashed here.",
+      "path": "payloads/stlink_v2/firmware/flash-stflash.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Firmware (.hex/.elf) via pyocd",
+      "description": "Flashes an operator-supplied target .hex/.elf/.bin via pyocd (target from QUIVER_STLINK_TARGET, e.g. stm32f103c8). prepare_fn requires a target and locates the image (QUIVER_STLINK_FW / firmware dir), aborting before confirm if either is missing.",
+      "path": "payloads/stlink_v2/firmware/flash-pyocd.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "sonoff_zbdongle_e": [
+    {
+      "name": "FIRMWARE - Flash EmberZNet Coordinator (NCP)",
+      "description": "Flash the EmberZNet NCP coordinator .gbl via universal-silabs-flasher. Prepare attempts to fetch the .gbl from NabuCasa/silabs-firmware-builder releases, else uses an operator-supplied image and aborts before confirm if absent; flash reuses the existing universal-silabs-flasher writer.",
+      "path": "payloads/sonoff_zbdongle_e/firmware/flash-coordinator.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash EmberZNet Router firmware",
+      "description": "Flash the EmberZNet EFR32MG21 router .gbl via universal-silabs-flasher. Prepare attempts to fetch from darkxst/silabs-firmware, else uses an operator-supplied image and aborts before confirm if absent; flash reuses the existing universal-silabs-flasher writer.",
+      "path": "payloads/sonoff_zbdongle_e/firmware/flash-router.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "heltec_lora32_v3": [
+    {
+      "name": "FIRMWARE - Flash Application Firmware",
+      "description": "Wires the existing ESP32-S3 merged-image esptool flash (0x0). prepare_fn locates operator app.bin under firmware/heltec_lora32_v3/user/.",
+      "path": "payloads/heltec_lora32_v3/firmware/flash-app-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Full Partition Set",
+      "description": "Wires the existing ESP32-S3 4-file flash (0x0/0x8000/0xe000/0x10000). prepare_fn requires the four bins in the user dir.",
+      "path": "payloads/heltec_lora32_v3/firmware/flash-partition-set.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (ESP32-S3)",
+      "description": "Wires the existing MicroPython flow. prepare_fn locates an operator ESP32-S3 MicroPython .bin (micropython.org); flash erases then writes at 0x0.",
+      "path": "payloads/heltec_lora32_v3/firmware/flash-micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ESP32 Marauder (S3)",
+      "description": "ESP32 Marauder from justcallmekoko/ESP32Marauder (ESP32-S3/dev_board_pro build). prepare_fn downloads the S3 release .bin (+support bins if present); flash writes full set at 0x0/0x8000/0xe000/0x10000 or firmware-only at 0x10000.",
+      "path": "payloads/heltec_lora32_v3/firmware/flash-marauder.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Meshtastic (heltec-v3)",
+      "description": "Meshtastic from meshtastic/firmware (heltec-v3 variant). prepare_fn downloads firmware-heltec-v3-*.bin from the latest release; flash erases then writes the factory image at 0x0 (esptool, ESP32-S3).",
+      "path": "payloads/heltec_lora32_v3/firmware/flash-meshtastic.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "lilygo_lora32": [
+    {
+      "name": "FIRMWARE - Flash Application Firmware",
+      "description": "Wires the existing ESP32 app-flash (0x10000). prepare_fn locates operator app.bin under firmware/lilygo_lora32/user/.",
+      "path": "payloads/lilygo_lora32/firmware/flash-app-firmware.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Full Partition Set",
+      "description": "Wires the existing 4-file ESP32 flash (0x1000/0x8000/0xe000/0x10000). prepare_fn requires the four bins in the user dir.",
+      "path": "payloads/lilygo_lora32/firmware/flash-partition-set.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash MicroPython (ESP32)",
+      "description": "Wires the existing MicroPython flow. prepare_fn locates an operator ESP32 MicroPython .bin; flash erases then writes at 0x1000.",
+      "path": "payloads/lilygo_lora32/firmware/flash-micropython.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Meshtastic (tlora-v2-1-1.6)",
+      "description": "Meshtastic from meshtastic/firmware (tlora-v2-1-1.6 variant for LoRa32 v1.6.1). prepare_fn downloads the variant .bin; flash erases then writes the factory image at 0x0 (esptool, ESP32).",
+      "path": "payloads/lilygo_lora32/firmware/flash-meshtastic.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "lilygo_tzigbee": [
+    {
+      "name": "FIRMWARE - Flash ESP32-C3 Firmware (DIP pos 1)",
+      "description": "Wires the existing flash_esp32c3() esptool flow (0x0). prepare_fn locates an operator .bin under firmware/lilygo_tzigbee/user/; requires DIP switch Position 1.",
+      "path": "payloads/lilygo_tzigbee/firmware/flash-esp32c3.qfw",
+      "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Zigbee Coordinator (Z-Stack, DIP pos 2)",
+      "description": "Wires the existing cc2538-bsl coordinator flash. prepare_fn clones JelmerT/cc2538-bsl and locates a Z-Stack coordinator .hex (Koenkk/Z-Stack-firmware) in the user dir; flash runs cc2538-bsl -ewv. Requires DIP switch Position 2.",
+      "path": "payloads/lilygo_tzigbee/firmware/flash-zigbee-coordinator.qfw",
+      "added": "2026-08-11T00:00:00Z"
     }
   ]
 }

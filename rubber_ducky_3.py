@@ -50,6 +50,8 @@ from common import (
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    download_firmware, get_firmware_dir, get_github_release_asset_url,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -746,6 +748,269 @@ def op_enter_bootloader_mode():
         info("macOS: check 'ls /Volumes/' for RPI-RP2.")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ..." auto-flash) ─────────────────
+# In-the-wild firmwares wired as no-menu payloads. The Ducky 3 is RP2040-based,
+# so both firmwares are written by copying a .uf2 onto the RPI-RP2 bootloader
+# drive (the module's existing UF2 update flow). Sources:
+#   Hak5 Ducky firmware — https://github.com/hak5/usb-rubber-ducky (releases, ducky.uf2)
+#   Pico Ducky (alternative) — https://github.com/dbisu/pico-ducky
+#       (CircuitPython USB Rubber Ducky; CircuitPython from https://circuitpython.org)
+
+import urllib.request as _urlreq
+import zipfile as _zipfile
+
+FW_CIRCUITPY_BOARD = "raspberry_pi_pico"   # generic RP2040 CircuitPython build
+PICO_DUCKY_OWNER   = "dbisu"
+PICO_DUCKY_REPO    = "pico-ducky"
+_FW_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
+
+def _fw_dir() -> Path:
+    d = get_firmware_dir("rubber_ducky_3")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _http_get_text(url: str, timeout: int = 20) -> str:
+    req = _urlreq.Request(url, headers={"User-Agent": _FW_UA})
+    with _urlreq.urlopen(req, timeout=timeout) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _scrape_first(url: str, pattern: str) -> str:
+    try:
+        html = _http_get_text(url)
+    except Exception as e:
+        warn(f"  Could not fetch {url}: {e}")
+        return ""
+    m = re.search(pattern, html)
+    return m.group(0) if m else ""
+
+
+def _fetch_hak5_ducky_uf2():
+    """Obtain the Hak5 Ducky UF2 from GitHub releases, else an operator-supplied
+    *.uf2 dropped into the firmware dir."""
+    fwd = _fw_dir()
+    url = get_github_release_asset_url(GITHUB_OWNER, GITHUB_REPO, "", r"\.uf2$")
+    if not url:
+        tag, _ = check_latest_github_release(GITHUB_OWNER, GITHUB_REPO)
+        if tag:
+            url = (f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases/"
+                   f"download/{tag}/ducky.uf2")
+    if url:
+        dest = fwd / url.rsplit("/", 1)[-1]
+        if dest.exists() and dest.stat().st_size > 0:
+            ok(f"  Hak5 Ducky UF2 already downloaded: {dest.name}")
+            return dest
+        if download_firmware(url, dest, "Hak5 Ducky UF2"):
+            return dest
+    existing = sorted(fwd.glob("*.uf2"))
+    if existing:
+        ok(f"  Using operator-supplied UF2: {existing[-1].name}")
+        return existing[-1]
+    return None
+
+
+def _fetch_circuitpython_uf2():
+    page = f"https://circuitpython.org/board/{FW_CIRCUITPY_BOARD}/"
+    info(f"  Locating the latest CircuitPython UF2 on {page} …")
+    url = _scrape_first(
+        page,
+        r"https://downloads\.circuitpython\.org/bin/" + re.escape(FW_CIRCUITPY_BOARD)
+        + r"/en_US/adafruit-circuitpython-" + re.escape(FW_CIRCUITPY_BOARD)
+        + r"-en_US-[0-9.]+\.uf2")
+    if not url:
+        warn("  No CircuitPython UF2 link found on the board page.")
+        return None
+    dest = _fw_dir() / url.rsplit("/", 1)[-1]
+    if dest.exists() and dest.stat().st_size > 0:
+        ok(f"  CircuitPython UF2 already downloaded: {dest.name}")
+        return dest
+    return dest if download_firmware(url, dest, "CircuitPython UF2") else None
+
+
+def _fetch_pico_ducky():
+    info("  Fetching the pico-ducky payload package (dbisu/pico-ducky, US layout) …")
+    url = get_github_release_asset_url(PICO_DUCKY_OWNER, PICO_DUCKY_REPO, "",
+                                       r"pico-ducky-.*-US\.zip")
+    if not url:
+        warn("  Could not resolve a pico-ducky release asset from GitHub.")
+        return None
+    zip_dest = _fw_dir() / url.rsplit("/", 1)[-1]
+    if not (zip_dest.exists() and zip_dest.stat().st_size > 0):
+        if not download_firmware(url, zip_dest, "pico-ducky package"):
+            return None
+    extract_dir = _fw_dir() / "pico-ducky"
+    try:
+        if extract_dir.exists():
+            shutil.rmtree(extract_dir)
+        with _zipfile.ZipFile(zip_dest) as zf:
+            zf.extractall(extract_dir)
+    except Exception as e:
+        err(f"  Failed to extract pico-ducky package: {e}")
+        return None
+    for cand in [extract_dir, *extract_dir.rglob("*")]:
+        if cand.is_dir() and (cand / "code.py").exists():
+            ok(f"  pico-ducky files ready: {cand}")
+            return cand
+    warn("  Extracted the pico-ducky package but code.py was not found inside.")
+    return None
+
+
+def _copy_uf2_to_bootloader(uf2: Path) -> bool:
+    info("  Enter bootloader mode now: unplug, hold the button, replug (RPI-RP2 appears).")
+    drive = None
+    for _ in range(60):
+        drive = _find_rpi_rp2_mount()
+        if drive:
+            break
+        wait_status("  Waiting for the RPI-RP2 bootloader drive…")
+        time.sleep(1)
+    wait_done()
+    if not drive:
+        err("  RPI-RP2 bootloader drive did not appear — cannot flash.")
+        return False
+    ok(f"  RPI-RP2 drive: {drive}")
+    try:
+        shutil.copy2(str(uf2), str(drive / uf2.name))
+    except Exception as e:
+        err(f"  Copy to RPI-RP2 failed: {e}")
+        return False
+    ok(f"  Copied {uf2.name} → {drive} — the Ducky will reboot into the new firmware.")
+    return True
+
+
+def _find_circuitpy_drive():
+    flavor = get_os_flavor()
+    if flavor == "macos":
+        p = Path("/Volumes/CIRCUITPY")
+        return p if p.is_dir() else None
+    user = os.environ.get("USER", "")
+    for base in [Path(f"/media/{user}"), Path(f"/run/media/{user}"), Path("/media")]:
+        c = base / "CIRCUITPY"
+        if c.is_dir():
+            return c
+    return None
+
+
+def _fw_device_info():
+    heading("Device Info")
+    info(f"Board : {TOOL_NAME} (RP2040)")
+    mount = _find_ducky_mount()
+    boot = _find_rpi_rp2_mount()
+    if boot:
+        info(f"Mode  : bootloader (RPI-RP2 at {boot}) — ready for UF2 flashing")
+    elif mount:
+        info(f"Mode  : storage (DUCKY SD card at {mount})")
+    else:
+        info("Mode  : HID / not mounted")
+
+
+def _prep_hak5_ducky(staged) -> bool:
+    uf2 = _fetch_hak5_ducky_uf2()
+    if not uf2:
+        err("  Could not obtain the Hak5 Ducky UF2 — aborting before the flash.")
+        info(f"  Drop a ducky.uf2 into {_fw_dir()} or download from:")
+        info(f"    https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}/releases")
+        return False
+    staged["uf2"] = uf2
+    ok(f"  Ready to flash Hak5 Ducky firmware: {Path(uf2).name}")
+    return True
+
+
+def _prep_pico_ducky(staged) -> bool:
+    uf2 = _fetch_circuitpython_uf2()
+    if not uf2:
+        err("  Could not obtain the CircuitPython UF2 (pico-ducky base) — aborting.")
+        return False
+    pd = _fetch_pico_ducky()
+    if not pd:
+        err("  Could not obtain the pico-ducky payload set — aborting before the flash.")
+        return False
+    staged["uf2"] = uf2
+    staged["pd_dir"] = pd
+    ok("  Ready to flash CircuitPython + copy the pico-ducky files.")
+    return True
+
+
+def _flash_hak5_ducky(staged):
+    uf2 = staged.get("uf2")
+    if not uf2 or not Path(uf2).exists():
+        err("Hak5 Ducky UF2 missing at flash time — aborting.")
+        return
+    _copy_uf2_to_bootloader(Path(uf2))
+
+
+def _flash_pico_ducky(staged):
+    uf2 = staged.get("uf2")
+    pd = staged.get("pd_dir")
+    if not uf2 or not Path(uf2).exists() or not pd:
+        err("pico-ducky assets missing at flash time — aborting.")
+        return
+    if not _copy_uf2_to_bootloader(Path(uf2)):
+        return
+    info("  Waiting for the CIRCUITPY drive to appear after CircuitPython boots…")
+    drv = None
+    for _ in range(90):
+        drv = _find_circuitpy_drive()
+        if drv:
+            break
+        wait_status("  Waiting for CIRCUITPY…")
+        time.sleep(1)
+    wait_done()
+    if not drv:
+        err("  CIRCUITPY drive not found — copy the pico-ducky files manually from:")
+        info(f"    {pd}")
+        return
+    ok(f"  CIRCUITPY drive: {drv}")
+    for item in Path(pd).iterdir():
+        dest = drv / item.name
+        try:
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True)
+            else:
+                shutil.copy2(item, dest)
+        except Exception as e:
+            warn(f"  Could not copy {item.name}: {e}")
+    ok("  pico-ducky files copied to CIRCUITPY — the device now runs as a pico-ducky.")
+    info("  Edit payload.dd on the CIRCUITPY drive to set your DuckyScript payload.")
+
+
+def _dispatch_firmware_payload(fw: dict):
+    """Route a selected .qfw firmware payload to the right prepare/flash pair."""
+    fw_name = fw.get("firmware", "")
+    label = fw.get("label", f"Flash {fw_name}")
+    staged: dict = {}
+    if fw_name == "Hak5 Ducky":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_hak5_ducky(staged),
+            flash_fn=lambda: _flash_hak5_ducky(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Hak5 Ducky (hak5/usb-rubber-ducky, ducky.uf2)",
+                "Flasher  : copy UF2 to the RPI-RP2 bootloader drive",
+            ],
+        )
+    elif fw_name == "Pico Ducky":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_pico_ducky(staged),
+            flash_fn=lambda: _flash_pico_ducky(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} (RP2040)",
+                "Firmware : Pico Ducky (dbisu/pico-ducky, CircuitPython USB Rubber Ducky)",
+                "Flasher  : flash CircuitPython UF2, then copy pico-ducky files to CIRCUITPY",
+            ],
+        )
+    else:
+        err(f"Unknown firmware payload: {fw_name!r}")
+        info("  Supported: Hak5 Ducky, Pico Ducky")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -795,6 +1060,12 @@ def main():
         ok("USB Rubber Ducky 3 detected via USB (SD card not mounted).")
 
     check_firmware_version(mount)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [

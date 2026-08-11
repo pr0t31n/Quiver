@@ -24,6 +24,9 @@ from common import (
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, check_latest_github_release,
+    get_github_release_asset_url, download_firmware,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -390,6 +393,189 @@ def op_micropython_repl():
     info("Install mpremote: pip install mpremote --break-system-packages")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ") ───────────────────────────────
+
+ESP_CHIP         = "esp32"
+MESHTASTIC_OWNER = "meshtastic"
+MESHTASTIC_REPO  = "firmware"
+MESHTASTIC_VARIANT_PATTERNS = [r"firmware-tlora-v2-1-1[._]6-(?!.*update)[^/]*\.bin"]
+
+
+def _fw_user_dir() -> Path:
+    d = get_firmware_dir("lilygo_lora32") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _esptool(args, timeout=180):
+    cmd = [sys.executable, "-m", "esptool"] + args
+    info(f"Running: {' '.join(cmd)}")
+    return run_streaming(cmd, on_line=lambda l: info(l), timeout=timeout)
+
+
+def _download_release_asset(owner, repo, patterns, dest_dir, what):
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tag, _ = check_latest_github_release(owner, repo)
+    for pat in patterns:
+        url = get_github_release_asset_url(owner, repo, tag or "", pat)
+        if url:
+            fname = url.rsplit("/", 1)[-1]
+            dest = dest_dir / fname
+            if dest.exists() and dest.stat().st_size > 0:
+                ok(f"  {what} already present: {dest.name}")
+                return dest
+            if download_firmware(url, dest, what):
+                return dest
+    return None
+
+
+def _run_app_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        f = d / "app.bin"
+        if not f.exists():
+            bins = sorted(d.glob("*.bin"))
+            f = bins[0] if len(bins) == 1 else None
+        if not f:
+            err("  No merged app image found. Drop it as 'app.bin' into:")
+            err(f"    {d}")
+            return False
+        state["fw"] = f
+        ok(f"  Application firmware ready: {f}")
+        return True
+
+    def flash():
+        _esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "dio", "--flash_size", "4MB",
+            "0x10000", str(state["fw"]),
+        ], timeout=180)
+
+    run_firmware_payload(
+        fw.get("label", "Flash application firmware"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}", "SD card  : REMOVE before flashing",
+                       "Firmware : operator-supplied merged app image → 0x10000",
+                       f"Port     : {port}"])
+
+
+def _run_partition_payload(fw, port):
+    state = {}
+    layout = [("0x1000", "bootloader.bin"), ("0x8000", "partitions.bin"),
+              ("0xe000", "boot_app0.bin"), ("0x10000", "app.bin")]
+
+    def prep():
+        d = _fw_user_dir()
+        missing = [n for _, n in layout if not (d / n).exists()]
+        if missing:
+            err(f"  Missing partition image(s): {', '.join(missing)}")
+            err("  Drop bootloader.bin, partitions.bin, boot_app0.bin and app.bin into:")
+            err(f"    {d}")
+            return False
+        state["files"] = [(off, str(d / n)) for off, n in layout]
+        ok("  All four partition images present.")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                "write_flash", "--flash_mode", "dio", "--flash_size", "4MB"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _esptool(args, timeout=240)
+
+    run_firmware_payload(
+        fw.get("label", "Flash full partition set"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}", "SD card  : REMOVE before flashing",
+                       "Firmware : operator-supplied bootloader+partitions+boot_app0+app",
+                       f"Port     : {port}"])
+
+
+def _run_micropython_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        bins = sorted(d.glob("*micropython*.bin")) or sorted(d.glob("esp32-*.bin"))
+        f = bins[0] if bins else None
+        if not f:
+            err("  No MicroPython image found. Download the ESP32 build from")
+            err("  https://micropython.org/download/esp32/ and drop it into:")
+            err(f"    {d}")
+            return False
+        state["fw"] = f
+        ok(f"  MicroPython firmware ready: {f}")
+        return True
+
+    def flash():
+        _esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600", "erase_flash"], timeout=60)
+        _esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "dio", "--flash_size", "4MB",
+            "0x1000", str(state["fw"]),
+        ], timeout=180)
+
+    run_firmware_payload(
+        fw.get("label", "Flash MicroPython"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}", "SD card  : REMOVE before flashing",
+                       "Firmware : MicroPython for ESP32 (erase + 0x1000)",
+                       f"Port     : {port}"])
+
+
+def _run_meshtastic_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("lilygo_lora32") / "meshtastic"
+
+    def prep():
+        binf = _download_release_asset(MESHTASTIC_OWNER, MESHTASTIC_REPO,
+                                       MESHTASTIC_VARIANT_PATTERNS, dest,
+                                       "Meshtastic firmware (tlora-v2-1-1.6)")
+        if not binf:
+            err("  Could not fetch the Meshtastic tlora-v2-1-1.6 firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MESHTASTIC_OWNER}/{MESHTASTIC_REPO}/releases")
+            return False
+        state["fw"] = binf
+        ok(f"  Meshtastic firmware ready: {binf}")
+        return True
+
+    def flash():
+        # Meshtastic device-install for ESP32: erase then write the factory image at 0x0.
+        _esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600", "erase_flash"], timeout=60)
+        _esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "dio", "--flash_size", "detect",
+            "0x0", str(state["fw"]),
+        ], timeout=240)
+
+    run_firmware_payload(
+        fw.get("label", "Flash Meshtastic"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}", "SD card  : REMOVE before flashing",
+                       f"Firmware : Meshtastic tlora-v2-1-1.6 ({MESHTASTIC_OWNER}/{MESHTASTIC_REPO}) → erase + 0x0",
+                       f"Port     : {port}"])
+
+
+def _dispatch_firmware_payload(fw, port):
+    name = fw.get("firmware", "")
+    if name == "Meshtastic":
+        _run_meshtastic_payload(fw, port)
+    elif name == "Application":
+        _run_app_payload(fw, port)
+    elif name == "PartitionSet":
+        _run_partition_payload(fw, port)
+    elif name == "MicroPython":
+        _run_micropython_payload(fw, port)
+    else:
+        err(f"Unknown firmware payload '{name}' for {TOOL_NAME}.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -423,6 +609,12 @@ def main():
         sys.exit(1)
 
     ok(f"Connected on {port}")
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Device Info",

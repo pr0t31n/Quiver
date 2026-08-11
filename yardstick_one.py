@@ -16,13 +16,15 @@ from common import (
     confirm, prompt, pause, numbered_menu,
     get_os, get_os_flavor, run, run_output,
     WEB_MODE, wait_start, wait_status, wait_done, wait_timeout,
-    detect_usb_libusb,
+    detect_usb_libusb, find_serial_port_by_vidpid,
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages, ensure_pip_packages,
     ensure_system_tool,
-    web_detect_loop,
+    web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload, get_firmware_dir,
 )
+from pathlib import Path
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -483,6 +485,136 @@ def op_enter_bootloader():
         err(f"Bootloader command failed: {e}")
 
 
+# ── Firmware payload (main-page) ──────────────────────────────────────────────
+
+def _yardstick_fw_dir() -> Path:
+    return get_firmware_dir("yardstick_one")
+
+
+def _find_rfcat_firmware():
+    """Locate an RfCat CC1111 firmware .hex — operator-supplied in the tool's
+    firmware dir, or bundled inside the installed rfcat package. Returns Path/None.
+    RfCat firmware is built from https://github.com/atlas0fd00m/rfcat (firmware/)."""
+    d = _yardstick_fw_dir()
+    if d.exists():
+        for pat in ("RfCatYS1*.hex", "*YS1*.hex", "*.hex"):
+            hits = sorted(d.glob(pat))
+            if hits:
+                return hits[-1]
+    # Best-effort: some rfcat installs ship prebuilt firmware alongside the package.
+    try:
+        import rfcat
+        base = Path(rfcat.__file__).resolve().parent
+        for root in (base, base.parent):
+            hits = sorted(root.rglob("RfCatYS1*.hex"))
+            if hits:
+                return hits[-1]
+    except Exception:
+        pass
+    return None
+
+
+def _fetch_rfcat_firmware():
+    """Auto-source the RfCat CC1111 application firmware from the canonical public
+    repo (atlas0fd00m/rfcat), which ships PREBUILT .hex under firmware/bins/ so no
+    SDCC toolchain is needed. Shallow-clones into the tool firmware dir and returns
+    the YARD Stick One application hex (RfCatYS1.hex) — NOT the *CCBootloader*.hex,
+    which is the bootloader itself (flashed once via a hardware CC-Debugger, not via
+    rfcat_bootloader). Returns Path or None."""
+    import shutil
+    if not shutil.which("git"):
+        return None
+    src = _yardstick_fw_dir() / "rfcat_src"
+    try:
+        if not (src / ".git").exists():
+            info("  Fetching RfCat firmware (git clone atlas0fd00m/rfcat)…")
+            if run(f"git clone --depth 1 https://github.com/atlas0fd00m/rfcat '{src}'").returncode != 0:
+                return None
+    except Exception:
+        return None
+    bins = src / "firmware" / "bins"
+    # Prefer the application image; explicitly exclude the CC-Bootloader hex.
+    cands = [p for p in sorted(bins.glob("RfCatYS1*.hex"))
+             if "bootloader" not in p.name.lower()]
+    if not cands:
+        cands = [p for p in sorted(src.rglob("RfCatYS1*.hex"))
+                 if "bootloader" not in p.name.lower()]
+    return cands[-1] if cands else None
+
+
+def _prep_yardstick_firmware() -> bool:
+    """PREPARE step: ensure rfcat_bootloader is present and obtain the RfCat CC1111
+    application firmware. An operator-supplied image in the tool firmware dir wins;
+    otherwise the canonical public firmware is auto-sourced from atlas0fd00m/rfcat
+    (prebuilt firmware/bins/RfCatYS1.hex). Only if BOTH the operator image and the
+    auto-fetch fail does this return False (aborting BEFORE the confirm).
+    Returns True only when the tool and firmware are both ready."""
+    import shutil
+    ready = True
+    _yardstick_fw_dir().mkdir(parents=True, exist_ok=True)
+
+    if not shutil.which("rfcat_bootloader"):
+        info("  rfcat_bootloader not on PATH — attempting rfcat (pip) install…")
+        ensure_pip_packages([("rfcat", "rfcat")])
+    if not shutil.which("rfcat_bootloader"):
+        err("  rfcat_bootloader not available — cannot drive the CC-Bootloader.")
+        info("  It ships with rfcat: pip install rfcat --break-system-packages")
+        ready = False
+
+    hexf = _find_rfcat_firmware() or _fetch_rfcat_firmware()
+    if hexf and Path(hexf).exists():
+        ok(f"  RfCat firmware ready: {hexf}")
+    else:
+        err("  RfCat firmware image not found (auto-source from atlas0fd00m/rfcat failed).")
+        info(f"  Drop a built RfCat CC1111 application .hex into: {_yardstick_fw_dir()}")
+        info("  Or build from source (firmware/) — https://github.com/atlas0fd00m/rfcat")
+        info("  Expected name e.g. RfCatYS1.hex")
+        ready = False
+    return ready
+
+
+def _enter_bootloader_mode():
+    """Send the rfcat bootloader command (the same d.bootloader() call used by
+    op_enter_bootloader) without the interactive confirm — used inside the
+    firmware-payload flash step (which already gated on a single confirm)."""
+    try:
+        d, _ = _open_device()
+        try:
+            d.bootloader()
+        finally:
+            try:
+                d.cleanup()
+            except Exception:
+                pass
+        ok("Bootloader command sent — device re-enumerating as 1D50:6002.")
+    except Exception as e:
+        warn(f"Could not send bootloader command via rfcat: {e}")
+        info("If the device is already in bootloader mode (1D50:6002), continuing.")
+
+
+def _flash_yardstick_firmware():
+    """FLASH step: put the CC1111 into the CC-Bootloader and write the RfCat
+    firmware via rfcat_bootloader (rfcat's bundled bootloader client)."""
+    import shutil
+    hexf = _find_rfcat_firmware() or _fetch_rfcat_firmware()
+    if not hexf or not Path(hexf).exists():
+        err("RfCat firmware image missing at flash time — aborting.")
+        return
+    _enter_bootloader_mode()
+    time.sleep(3)
+    bl_port = find_serial_port_by_vidpid([(VID_BOOTLOADER, PID_BOOTLOADER)])
+    boot = shutil.which("rfcat_bootloader") or "rfcat_bootloader"
+    cmd = [boot, bl_port or "/dev/RFCAT_BL_YS1", "download", str(hexf)]
+    info(f"Running: {' '.join(cmd)}")
+    rc = run_streaming(cmd, on_line=lambda l: info(l), timeout=180)
+    if rc == 0:
+        ok("RfCat firmware flashed. Replug the Yardstick One (returns as 1D50:605B).")
+    else:
+        warn(f"rfcat_bootloader exited with code {rc}.")
+        info("If it reports no device, confirm the CC-Bootloader is present and the")
+        info("device is in bootloader mode (VID:PID 1D50:6002).")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -520,6 +652,22 @@ def main():
     ok("Yardstick One detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Flash RfCat firmware (CC-Bootloader)"),
+            info_fn=op_device_info,
+            prepare_fn=_prep_yardstick_firmware,
+            flash_fn=_flash_yardstick_firmware,
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'RfCat')} (CC1111)",
+                "Flasher  : rfcat_bootloader <port> download <hex> (CC-Bootloader)",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info (radio config)",

@@ -42,6 +42,8 @@ from common import (
     ensure_apt_packages, ensure_brew_packages, get_os_flavor,
     get_selected_payload, verify_device_connection,
     check_latest_github_release, compare_versions, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, download_firmware, get_github_release_asset_url,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -453,6 +455,167 @@ def op_firmware_update(flipper, port: str):
         info("  Navigate to the update file in the file manager and select 'Run in App'")
 
 
+# ── Firmware payloads (main-page auto-flash) ──────────────────────────────────
+# The four practical Flipper Zero firmwares. Each is distributed as a
+# "web-updater" self-update package (a .tgz) attached to that project's GitHub
+# releases. We fetch the latest release's .tgz, extract it, then apply it via the
+# module's EXISTING update path (upload the update package to /ext/update/ on the
+# SD card and issue flipper.update.install(manifest=…) over RPC).
+
+FIRMWARE_REPOS = {
+    "Official":    ("flipperdevices", "flipperzero-firmware",
+                    "Official Flipper Zero firmware (flipperdevices/flipperzero-firmware)"),
+    "Unleashed":   ("DarkFlippers", "unleashed-firmware",
+                    "Unleashed custom firmware (DarkFlippers/unleashed-firmware)"),
+    "RogueMaster": ("RogueMaster", "flipperzero-firmware-wPlugins",
+                    "RogueMaster custom firmware (RogueMaster/flipperzero-firmware-wPlugins)"),
+    "Momentum":    ("Next-Flip", "Momentum-Firmware",
+                    "Momentum custom firmware, successor to Xtreme (Next-Flip/Momentum-Firmware)"),
+}
+
+# Web-updater package asset — every project ships one named like
+# 'flipper-z-f7-update-<ver>.tgz'.
+_WEB_UPDATER_ASSET_RE = r"f7-update.*\.tgz$"
+
+
+def _prep_flipper_web_updater(fw_name: str, staged: dict) -> bool:
+    """PREPARE step: resolve the latest release, download the web-updater .tgz,
+    extract it, and locate update.fuf. Returns True only when the package is
+    fully staged locally so the only remaining step is the write."""
+    owner, repo, desc = FIRMWARE_REPOS[fw_name]
+    info(f"Firmware : {fw_name} — {desc}")
+
+    tag, rel_url = check_latest_github_release(owner, repo)
+    if not tag:
+        err(f"  Could not resolve the latest release for {owner}/{repo} — aborting.")
+        info(f"  Check manually: https://github.com/{owner}/{repo}/releases")
+        return False
+    ok(f"  Latest release: {tag}")
+
+    asset_url = get_github_release_asset_url(owner, repo, tag, _WEB_UPDATER_ASSET_RE)
+    if not asset_url:
+        err(f"  No web-updater .tgz asset found in {owner}/{repo} {tag} — aborting.")
+        info(f"  Download manually from: {rel_url or f'https://github.com/{owner}/{repo}/releases'}")
+        return False
+
+    slug = fw_name.lower()
+    dl_dir = get_firmware_dir("flipper_zero") / slug
+    dl_dir.mkdir(parents=True, exist_ok=True)
+    tgz_name = asset_url.rsplit("/", 1)[-1] or f"{slug}-update.tgz"
+    tgz_path = dl_dir / tgz_name
+
+    if not download_firmware(asset_url, tgz_path, tool_name=f"{fw_name} web-updater"):
+        err("  Web-updater package download failed — aborting.")
+        info(f"  Download manually: {asset_url}")
+        return False
+
+    import shutil as _sh
+    import tarfile
+    extract_dir = dl_dir / "extracted"
+    if extract_dir.exists():
+        _sh.rmtree(extract_dir, ignore_errors=True)
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    info(f"  Extracting {tgz_path.name}…")
+    try:
+        with tarfile.open(tgz_path, "r:gz") as tf:
+            tf.extractall(extract_dir)
+    except Exception as e:  # noqa: BLE001
+        err(f"  Failed to extract the web-updater package: {e}")
+        return False
+
+    fufs = sorted(extract_dir.rglob("update.fuf"))
+    if not fufs:
+        err("  update.fuf manifest not found inside the package — aborting.")
+        info("  The release asset may not be a web-updater package.")
+        return False
+    update_fuf = fufs[0]
+
+    staged["fw_name"] = fw_name
+    staged["tag"] = tag
+    staged["update_fuf"] = update_fuf
+    staged["pkg_dir"] = update_fuf.parent
+    staged["qflipper"] = _sh.which("qFlipper") or _sh.which("qflipper") or ""
+    ok(f"  Update package staged: {staged['pkg_dir']}")
+    if staged["qflipper"]:
+        info(f"  qFlipper detected ({staged['qflipper']}) — you may alternatively "
+             "apply the package with the qFlipper desktop app.")
+    return True
+
+
+def _flash_flipper_web_updater(flipper, staged: dict):
+    """FLASH step: upload the staged update package to /ext/update/<pkg>/ on the
+    SD card and issue the install over RPC — the module's existing update path."""
+    pkg_dir = staged["pkg_dir"]
+    update_fuf = staged["update_fuf"]
+    remote_base = f"/ext/update/{pkg_dir.name}"
+
+    info(f"Uploading the update package to {remote_base}/ on the Flipper SD card…")
+    for d in ("/ext/update", remote_base):
+        try:
+            flipper.storage.mkdir(path=d)
+        except Exception:
+            pass  # already exists / created by an earlier write
+
+    files = sorted(p for p in pkg_dir.rglob("*") if p.is_file())
+    remote_fuf = f"{remote_base}/{update_fuf.name}"
+    for f in files:
+        rel = f.relative_to(pkg_dir)
+        remote = f"{remote_base}/{rel.as_posix()}"
+        if rel.parent != Path("."):
+            try:
+                flipper.storage.mkdir(path=f"{remote_base}/{rel.parent.as_posix()}")
+            except Exception:
+                pass
+        info(f"  → {rel.as_posix()} ({f.stat().st_size // 1024} KB)")
+        try:
+            with open(f, "rb") as fh:
+                flipper.storage.write.file(file=remote, data=fh.read())
+        except Exception as e:  # noqa: BLE001
+            err(f"  Upload failed for {rel.as_posix()}: {e}")
+            info("  Ensure the SD card has enough free space and is writable.")
+            return
+        if f == update_fuf:
+            remote_fuf = remote
+    ok("Update package uploaded to the SD card.")
+
+    info(f"Triggering the install from {remote_fuf} — the Flipper reboots into")
+    info("update mode and flashes. This takes 1-3 minutes.")
+    warn("Do NOT disconnect USB or power until the update completes.")
+    try:
+        flipper.update.install(manifest=remote_fuf)
+        ok(f"{staged['fw_name']} update initiated — the Flipper will reboot and flash.")
+        warn("Do not disconnect USB until the update is complete.")
+    except Exception as e:  # noqa: BLE001
+        err(f"Firmware install command failed: {e}")
+        info("You can complete the update manually on the Flipper:")
+        info(f"  Archive/File manager → {remote_fuf} → 'Run in App'.")
+
+
+def _dispatch_firmware_payload(fw: dict, flipper, port: str):
+    """Route a selected .qfw firmware payload to the right prepare/flash pair."""
+    fw_name = fw.get("firmware", "")
+    if fw_name not in FIRMWARE_REPOS:
+        err(f"Unknown Flipper Zero firmware payload: {fw_name!r}")
+        info(f"  Supported: {', '.join(FIRMWARE_REPOS)}")
+        return
+    owner, repo, _desc = FIRMWARE_REPOS[fw_name]
+    staged: dict = {}
+    run_firmware_payload(
+        fw.get("label", f"Flash {fw_name} firmware"),
+        info_fn=lambda: op_device_info(flipper),
+        prepare_fn=lambda: _prep_flipper_web_updater(fw_name, staged),
+        flash_fn=lambda: _flash_flipper_web_updater(flipper, staged),
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : {fw_name} ({owner}/{repo})",
+            f"Release  : {staged.get('tag', 'latest')}",
+            f"Package  : {staged.get('pkg_dir', '(web-updater .tgz)')}",
+            f"Port     : {port}",
+            "Flasher  : SD update-package flow (flipper.update.install over RPC)",
+        ],
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -498,6 +661,12 @@ def main():
         sys.exit(1)
 
     ok("PyFlipper session established.")
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, flipper, port)
+        return
 
     check_firmware_version(flipper)
 

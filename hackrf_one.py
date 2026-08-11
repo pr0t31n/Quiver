@@ -24,6 +24,8 @@ from common import (
     ensure_system_tool,
     web_detect_loop, run_streaming,
     check_latest_github_release, compare_versions, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, download_firmware, get_github_release_asset_url,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -397,6 +399,94 @@ def op_firmware_update():
         warn(f"hackrf_spiflash exited with code {rc}")
 
 
+# ── Firmware payload (main-page) ──────────────────────────────────────────────
+
+def _hackrf_fw_dir() -> Path:
+    return get_firmware_dir("hackrf_one")
+
+
+def _find_hackrf_bin():
+    """Newest downloaded/operator-supplied stock HackRF firmware bin, or None."""
+    d = _hackrf_fw_dir()
+    if not d.exists():
+        return None
+    bins = sorted(d.rglob("hackrf_one_usb.bin"))
+    if bins:
+        return bins[-1]
+    other = sorted(d.glob("*.bin"))
+    return other[-1] if other else None
+
+
+def _download_hackrf_firmware():
+    """Fetch the stock HackRF One firmware from the greatscottgadgets/hackrf
+    release. Tries a direct hackrf_one_usb.bin asset, then the release tarball
+    (extracting the prebuilt bin). Returns the bin Path or None.
+    Source: https://github.com/greatscottgadgets/hackrf/releases"""
+    d = _hackrf_fw_dir()
+    d.mkdir(parents=True, exist_ok=True)
+
+    url = get_github_release_asset_url("greatscottgadgets", "hackrf", "",
+                                       r"hackrf_one_usb\.bin$")
+    if url:
+        dest = d / "hackrf_one_usb.bin"
+        if download_firmware(url, dest, "HackRF One firmware"):
+            return dest
+
+    turl = get_github_release_asset_url("greatscottgadgets", "hackrf", "",
+                                        r"hackrf-.*\.tar\.xz$")
+    if turl:
+        tar_dest = d / "hackrf-release.tar.xz"
+        if download_firmware(turl, tar_dest, "HackRF release tarball"):
+            try:
+                import tarfile
+                with tarfile.open(tar_dest) as tf:
+                    for m in tf.getmembers():
+                        if m.name.endswith("hackrf_one_usb.bin"):
+                            m.name = "hackrf_one_usb.bin"
+                            tf.extract(m, d)
+                            return d / "hackrf_one_usb.bin"
+                warn("hackrf_one_usb.bin not found inside the release tarball.")
+            except Exception as e:
+                warn(f"Could not extract firmware from tarball: {e}")
+    return None
+
+
+def _prep_hackrf_firmware() -> bool:
+    """PREPARE step: ensure hackrf_spiflash is present and the stock firmware bin
+    is downloaded so only the write remains. Returns True only when ready."""
+    ready = True
+    if not ensure_system_tool("hackrf_spiflash",
+                              "sudo apt install hackrf  /  brew install hackrf",
+                              apt_pkg="hackrf", brew_pkg="hackrf"):
+        err("  hackrf_spiflash not available — cannot flash.")
+        ready = False
+
+    binf = _find_hackrf_bin() or _download_hackrf_firmware()
+    if binf and Path(binf).exists():
+        ok(f"  Firmware ready: {binf}")
+    else:
+        err("  Stock HackRF firmware could not be sourced automatically.")
+        info(f"  Drop hackrf_one_usb.bin into: {_hackrf_fw_dir()}")
+        info("  Source: https://github.com/greatscottgadgets/hackrf/releases")
+        ready = False
+    return ready
+
+
+def _flash_hackrf_firmware():
+    """FLASH step: reuse hackrf_spiflash -w (same writer as op_firmware_update)."""
+    binf = _find_hackrf_bin()
+    if not binf or not Path(binf).exists():
+        err("Firmware bin missing at flash time — aborting.")
+        return
+    info(f"Flashing {Path(binf).name} via hackrf_spiflash…")
+    cmd = ["hackrf_spiflash", "-w", str(binf)]
+    rc = run_streaming(cmd, on_line=lambda l: info(l), timeout=120)
+    if rc == 0:
+        ok("Firmware flashed successfully. Replug the HackRF One.")
+    else:
+        warn(f"hackrf_spiflash exited with code {rc}")
+
+
 def op_device_info_verbose():
     heading("Device Info — Verbose (all serials)")
     info("Lists all connected HackRF devices with serial numbers.")
@@ -438,6 +528,24 @@ def main():
     ok("HackRF One detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Firmware Update (hackrf_spiflash)"),
+            info_fn=op_device_info,
+            prepare_fn=_prep_hackrf_firmware,
+            flash_fn=_flash_hackrf_firmware,
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'Stock')} (hackrf_one_usb.bin)",
+                "Flasher  : hackrf_spiflash -w (SPI flash, normal USB mode)",
+                "NOTE     : This flashes STOCK HackRF firmware. PortaPack Mayhem",
+                "           is a separate device/firmware and is NOT handled here.",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info (hackrf_info)",

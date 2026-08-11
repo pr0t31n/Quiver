@@ -60,6 +60,8 @@ from common import (
     require_sudo, sudo_run, sudo_output, run_streaming_sudo,
     ensure_apt_packages, ensure_brew_packages, get_os_flavor,
     check_latest_github_release, compare_versions, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, download_firmware, get_github_release_asset_url,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -520,6 +522,95 @@ def op_firmware_update(port: str):
         info("  - Permission error: check udev rules or run with sudo")
 
 
+# ── Firmware payload (main-page) ──────────────────────────────────────────────
+
+def _chameleon_fw_dir() -> Path:
+    return get_firmware_dir("chameleon_ultra")
+
+
+def _find_chameleon_zip():
+    """Newest downloaded/operator-supplied ChameleonUltra DFU .zip, or None.
+    Prefers an 'ultra' app package over the 'lite' variant."""
+    d = _chameleon_fw_dir()
+    if not d.exists():
+        return None
+    zips = sorted(d.glob("*.zip"))
+    for z in zips:
+        if "ultra" in z.name.lower():
+            return z
+    return zips[-1] if zips else None
+
+
+def _download_chameleon_firmware():
+    """Fetch the official ChameleonUltra DFU app .zip from the
+    RfidResearchGroup/ChameleonUltra release. Returns the .zip Path or None.
+    Source: https://github.com/RfidResearchGroup/ChameleonUltra/releases"""
+    d = _chameleon_fw_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    for pat in (r"ultra.*dfu.*app.*\.zip$", r"ultra.*app.*\.zip$", r"ultra.*\.zip$"):
+        url = get_github_release_asset_url("RfidResearchGroup", "ChameleonUltra", "", pat)
+        if url:
+            dest = d / url.split("/")[-1]
+            if download_firmware(url, dest, "ChameleonUltra firmware"):
+                return dest
+    return None
+
+
+def _prep_chameleon_firmware(staged: dict) -> bool:
+    """PREPARE step: ensure nrfutil is present, download the official firmware
+    .zip, and wait for the device to be in DFU mode so only the write remains.
+    Returns True only when everything is ready; False aborts before the confirm."""
+    ready = True
+    if not ensure_system_tool(
+        "nrfutil",
+        "pip install nrfutil --break-system-packages && nrfutil install device",
+    ):
+        err("  nrfutil not available — cannot flash.")
+        info("  Install: pip install nrfutil --break-system-packages && nrfutil install device")
+        ready = False
+
+    zipf = _find_chameleon_zip() or _download_chameleon_firmware()
+    if zipf and Path(zipf).exists():
+        ok(f"  Firmware ready: {zipf}")
+        staged["zip"] = str(zipf)
+    else:
+        err("  ChameleonUltra firmware .zip could not be sourced automatically.")
+        info(f"  Drop the official Ultra DFU app .zip into: {_chameleon_fw_dir()}")
+        info("  Source: https://github.com/RfidResearchGroup/ChameleonUltra/releases")
+        ready = False
+
+    if not ready:
+        return False
+
+    info("  Put the Chameleon Ultra into DFU mode: hold button B while plugging")
+    info("  in USB-C (DFU VID:PID 1915:521F, solid LED).")
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        if detect_chameleon_dfu():
+            ok("  DFU device detected — ready to flash.")
+            return True
+        time.sleep(2)
+    err("  DFU device not detected within 120s — aborting before flash.")
+    return False
+
+
+def _flash_chameleon_firmware(staged: dict):
+    """FLASH step: reuse the nrfutil DFU writer (identical to op_firmware_update)."""
+    zip_file = staged.get("zip")
+    if not zip_file or not Path(zip_file).exists():
+        err("Firmware .zip missing at flash time — aborting.")
+        return
+    nrfutil_bin = shutil.which("nrfutil") or "nrfutil"
+    cmd = [nrfutil_bin, "device", "program", "--firmware", str(zip_file), "--traits", "nordicDfu"]
+    info(f"Running: {' '.join(cmd)}")
+    rc = run_streaming(cmd, on_line=lambda l: info(l), timeout=300)
+    if rc == 0:
+        ok("Firmware update complete. Device will reboot automatically.")
+        info("Wait for the device to re-enumerate as /dev/ttyACM* before using again.")
+    else:
+        err(f"nrfutil exited with code {rc}. Check output above for details.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -563,6 +654,24 @@ def main():
     _check_dialout(port)
 
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        staged: dict = {}
+        run_firmware_payload(
+            fw.get("label", "Firmware Update"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_chameleon_firmware(staged),
+            flash_fn=lambda: _flash_chameleon_firmware(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'ChameleonUltra')} (official DFU app .zip)",
+                "Source   : RfidResearchGroup/ChameleonUltra releases",
+                "Flasher  : nrfutil device program (Nordic DFU, VID:PID 1915:521F)",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info",

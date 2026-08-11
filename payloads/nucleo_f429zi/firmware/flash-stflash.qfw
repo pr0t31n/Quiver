@@ -1,0 +1,1 @@
+{"type":"firmware_flash","board":"STM32 Nucleo-F429ZI","firmware":"st-flash","label":"Flash Firmware (.bin) via st-flash"}

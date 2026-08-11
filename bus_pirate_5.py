@@ -43,6 +43,8 @@ from common import (
     find_mounted_drive,
     require_sudo, sudo_run, sudo_output, run_streaming_sudo,
     ensure_apt_packages, ensure_brew_packages, get_os_flavor,
+    get_firmware_dir, get_github_release_asset_url, check_latest_github_release,
+    download_firmware, selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -56,6 +58,18 @@ VID_PID_UF2  = [(0x2E8A, 0x0003)]
 BAUD_RATE    = 115200
 FS_LABEL     = "BusPirate-FS"
 UF2_LABEL    = "RPI-RP2"
+
+# Official Bus Pirate 5 firmware — DangerousPrototypes/BusPirate5-firmware
+# (RP2040 UF2 images). https://github.com/DangerousPrototypes/BusPirate5-firmware/releases
+BP5_FW_OWNER = "DangerousPrototypes"
+BP5_FW_REPO  = "BusPirate5-firmware"
+# Env override: point QUIVER_BP5_UF2 at an operator-supplied .uf2, or set
+# QUIVER_BP5_REV to the release asset selector (e.g. "rev10") for auto-download.
+BP5_UF2_ENV  = "QUIVER_BP5_UF2"
+BP5_REV_ENV  = "QUIVER_BP5_REV"
+
+# Resolved firmware path chosen by the payload prepare step, flashed by flash step.
+_BP5_FW_PATH = None
 
 CONNECT_INSTRUCTIONS = (
     "Bus Pirate 5 not detected.\n\n"
@@ -258,27 +272,10 @@ def op_power_control(port: str):
         err(f"Power control failed: {e}")
 
 
-def op_firmware_update(port: str):
-    heading("Firmware Update")
-    info("Firmware update uses UF2 bootloader — no special flashing tool required.")
-    info("Process:")
-    info("  1. Send '$' to enter UF2 bootloader mode (or hold BOOT + plug USB)")
-    info("  2. Device remounts as 'RPI-RP2' mass storage volume")
-    info("  3. Copy .uf2 file to the volume — device flashes and reboots automatically")
-    info("Download firmware from: https://github.com/DangerousPrototypes/BusPirate5-firmware/releases")
-    uf2_path = prompt("Path to .uf2 firmware file")
-    if not uf2_path:
-        warn("No file path provided. Aborting.")
-        return
-    uf2_file = Path(uf2_path)
-    if not uf2_file.exists():
-        err(f"File not found: {uf2_file}")
-        return
-    if uf2_file.suffix.lower() != ".uf2":
-        warn(f"File does not have a .uf2 extension: {uf2_file.name}")
-        if not confirm("Continue anyway?", default=False):
-            return
-
+def _bp5_flash_uf2(port: str, uf2_file: Path) -> bool:
+    """Shared UF2 flash core: enter the RP2040 UF2 bootloader, wait for the
+    RPI-RP2 mass-storage volume, then copy the .uf2 (device auto-flashes and
+    reboots). Reused by the interactive menu op and the firmware payload."""
     info("Sending '$' to enter bootloader mode…")
     try:
         with _open_serial(port) as ser:
@@ -313,7 +310,7 @@ def op_firmware_update(port: str):
         info("  1. Hold BOOT button while plugging in USB (forces UF2 mode)")
         info("  2. Check: lsblk | grep -i rpi  or  ls /media/$USER/")
         info("  3. Check: dmesg | tail -30")
-        return
+        return False
 
     wait_done(f"RPI-RP2 mounted at {mount}")
     dest = mount / uf2_file.name
@@ -323,9 +320,104 @@ def op_firmware_update(port: str):
         shutil.copy2(str(uf2_file), str(dest))
         ok("Firmware file copied. Device will flash and reboot automatically.")
         info("Wait for the device to reboot and re-enumerate as /dev/ttyACM* before using again.")
+        return True
     except Exception as e:
         err(f"File copy failed: {e}")
         info("If permission denied, check mount options: mount | grep RPI-RP2")
+        return False
+
+
+def _bp5_locate_uf2() -> Path:
+    """Find an operator-supplied .uf2 (env override, then firmware dir)."""
+    env = os.environ.get(BP5_UF2_ENV, "").strip()
+    if env and Path(env).exists():
+        return Path(env)
+    fdir = get_firmware_dir("bus_pirate_5")
+    if fdir.exists():
+        uf2s = sorted(fdir.rglob("*.uf2"))
+        if uf2s:
+            return uf2s[-1]
+    return None
+
+
+def _prep_bp5_firmware(port: str) -> bool:
+    """Firmware-payload PREPARE: obtain a Bus Pirate 5 .uf2 (operator-supplied or
+    downloaded from the official DangerousPrototypes/BusPirate5-firmware release)
+    so the only remaining step is the UF2 copy. Returns True only when ready."""
+    global _BP5_FW_PATH
+    fdir = get_firmware_dir("bus_pirate_5")
+    fdir.mkdir(parents=True, exist_ok=True)
+
+    uf2 = _bp5_locate_uf2()
+    if uf2:
+        ok(f"  Firmware ready (operator-supplied): {uf2}")
+        _BP5_FW_PATH = uf2
+        return True
+
+    # No operator image — attempt an unambiguous auto-download from the official
+    # release. BP5 ships several hardware-revision .uf2 assets, so the operator
+    # must name the revision via QUIVER_BP5_REV (e.g. "rev10") to avoid flashing
+    # the wrong image.
+    rev = os.environ.get(BP5_REV_ENV, "").strip()
+    if not rev:
+        err("  No Bus Pirate 5 .uf2 found and no revision selected.")
+        info(f"  The official release ships one .uf2 per hardware revision, so the")
+        info(f"  correct image cannot be guessed. Either:")
+        info(f"    - drop the correct .uf2 in {fdir} (or set {BP5_UF2_ENV}=/path/to.uf2), or")
+        info(f"    - set {BP5_REV_ENV} to your board revision (e.g. rev10) to auto-download.")
+        info(f"  Releases: https://github.com/{BP5_FW_OWNER}/{BP5_FW_REPO}/releases")
+        return False
+
+    tag, _ = check_latest_github_release(BP5_FW_OWNER, BP5_FW_REPO)
+    url = get_github_release_asset_url(BP5_FW_OWNER, BP5_FW_REPO, tag,
+                                       rf"{rev}.*\.uf2$")
+    if not url:
+        url = get_github_release_asset_url(BP5_FW_OWNER, BP5_FW_REPO, tag,
+                                           rf".*{rev}.*\.uf2$")
+    if not url:
+        err(f"  No .uf2 asset matching revision '{rev}' in release {tag or '(latest)'}.")
+        info(f"  Check the asset names: https://github.com/{BP5_FW_OWNER}/{BP5_FW_REPO}/releases")
+        return False
+
+    dest = fdir / url.rsplit("/", 1)[-1]
+    if download_firmware(url, dest, tool_name="Bus Pirate 5 firmware"):
+        ok(f"  Firmware ready (downloaded): {dest}")
+        _BP5_FW_PATH = dest
+        return True
+    err("  Firmware download failed — see output above.")
+    return False
+
+
+def _flash_bp5_firmware(port: str):
+    """Firmware-payload FLASH: everything is prepped — copy the resolved .uf2."""
+    if not _BP5_FW_PATH or not Path(_BP5_FW_PATH).exists():
+        err("Firmware .uf2 missing at flash time — aborting.")
+        return
+    _bp5_flash_uf2(port, Path(_BP5_FW_PATH))
+
+
+def op_firmware_update(port: str):
+    heading("Firmware Update")
+    info("Firmware update uses UF2 bootloader — no special flashing tool required.")
+    info("Process:")
+    info("  1. Send '$' to enter UF2 bootloader mode (or hold BOOT + plug USB)")
+    info("  2. Device remounts as 'RPI-RP2' mass storage volume")
+    info("  3. Copy .uf2 file to the volume — device flashes and reboots automatically")
+    info("Download firmware from: https://github.com/DangerousPrototypes/BusPirate5-firmware/releases")
+    uf2_path = prompt("Path to .uf2 firmware file")
+    if not uf2_path:
+        warn("No file path provided. Aborting.")
+        return
+    uf2_file = Path(uf2_path)
+    if not uf2_file.exists():
+        err(f"File not found: {uf2_file}")
+        return
+    if uf2_file.suffix.lower() != ".uf2":
+        warn(f"File does not have a .uf2 extension: {uf2_file.name}")
+        if not confirm("Continue anyway?", default=False):
+            return
+
+    _bp5_flash_uf2(port, uf2_file)
 
 
 def op_upload_script(port: str):
@@ -398,6 +490,23 @@ def main():
 
     ok(f"Connected on {port}")
     _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Firmware Update (.uf2)"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_bp5_firmware(port),
+            flash_fn=lambda: _flash_bp5_firmware(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'BusPirate5-firmware')} (RP2040 UF2)",
+                f"Port     : {port}",
+                "Flasher  : UF2 bootloader copy to the RPI-RP2 volume",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info (i)",

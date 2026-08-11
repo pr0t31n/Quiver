@@ -1,0 +1,1 @@
+{"type":"firmware_flash","board":"STM32 Nucleo-F429ZI","firmware":"pyocd","label":"Flash Firmware (.hex/.elf) via pyocd"}

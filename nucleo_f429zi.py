@@ -29,6 +29,7 @@ from common import (
     require_sudo, sudo_run,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    get_firmware_dir, selected_firmware_payload, run_firmware_payload,
 )
 
 
@@ -248,6 +249,26 @@ def op_flash_firmware():
         err("Firmware flash failed.")
 
 
+def _flash_stflash_bin(fw_path: str, address: str = "0x08000000") -> bool:
+    """Shared st-flash core: write a raw .bin at *address*. Reused by the menu op
+    and the firmware payload."""
+    info(f"Running: st-flash write {fw_path} {address}")
+    info("Expected: progress bar showing pages written and verified.")
+    rc = run_streaming(
+        ["st-flash", "write", fw_path, address],
+        on_line=lambda l: info(l), timeout=120,
+    )
+    if rc == 0:
+        ok("st-flash write complete.")
+        return True
+    err(f"st-flash exited with code {rc}.")
+    info("Troubleshooting:")
+    info("  - 'STLINK_SWDCLK_TOO_FAST': try lower frequency with --freq=100k")
+    info("  - 'Target voltage too low': check VCC connection on SWD header")
+    info("  - 'Flash locked': run st-flash erase first")
+    return False
+
+
 def op_flash_stflash():
     heading("Flash via st-flash")
     info("st-flash is part of the stlink-tools package — an alternative to pyocd for .bin files.")
@@ -267,20 +288,7 @@ def op_flash_stflash():
         err(f"File not found: {fw_path}")
         return
     address = prompt("Flash start address (hex)", default="0x08000000")
-    info(f"Running: st-flash write {fw_path} {address}")
-    info("Expected: progress bar showing pages written and verified.")
-    rc = run_streaming(
-        ["st-flash", "write", fw_path, address],
-        on_line=lambda l: info(l), timeout=120,
-    )
-    if rc == 0:
-        ok("st-flash write complete.")
-    else:
-        err(f"st-flash exited with code {rc}.")
-        info("Troubleshooting:")
-        info("  - 'STLINK_SWDCLK_TOO_FAST': try lower frequency with --freq=100k")
-        info("  - 'Target voltage too low': check VCC connection on SWD header")
-        info("  - 'Flash locked': run st-flash erase first")
+    _flash_stflash_bin(fw_path, address)
 
 
 def op_verify_flash():
@@ -1235,6 +1243,92 @@ def op_click_shield_menu():
             break
 
 
+# ── Firmware payload wiring ────────────────────────────────────────────────────
+#
+# The main-page firmware payloads flash the companion Click firmware onto the
+# STM32F429ZI, reusing the module's existing flash paths (pyocd / st-flash).
+# The image is operator-supplied — set QUIVER_CLICK_FW or drop the file in the
+# tool's firmware dir; prepare aborts BEFORE the confirmation if none is found.
+
+_NUCLEO_FW_PATH = {"path": ""}
+
+
+def _nucleo_locate_fw(exts) -> str:
+    """Find an operator-supplied firmware image: env override first, then the
+    tool's firmware dir (newest file matching one of *exts*)."""
+    env = os.environ.get(CLICK_FW_ENV, "").strip()
+    if env and os.path.exists(env) and env.lower().endswith(tuple(exts)):
+        return env
+    fdir = get_firmware_dir("nucleo_f429zi")
+    if fdir.exists():
+        cands = sorted(p for e in exts for p in fdir.rglob(f"*{e}"))
+        if cands:
+            return str(cands[-1])
+    return ""
+
+
+def _prep_nucleo_fw(kind: str) -> bool:
+    """Firmware-payload PREPARE: locate the operator-supplied Click firmware and
+    confirm the flasher is available. Returns True only when the sole remaining
+    step is the write; returns False (abort before confirm) if no image is found."""
+    if kind == "stflash":
+        exts = (".bin",)
+        if not ensure_system_tool(
+            "st-flash", "apt install stlink-tools  (Kali/Debian/Ubuntu)",
+            apt_pkg="stlink-tools",
+        ):
+            err("  st-flash unavailable — install stlink-tools.")
+            return False
+    else:
+        exts = (".bin", ".hex", ".elf")
+        try:
+            import pyocd  # noqa: F401
+        except ImportError:
+            err("  pyocd not installed — run: pip install pyocd --break-system-packages")
+            return False
+
+    fw = _nucleo_locate_fw(exts)
+    if not fw:
+        fdir = get_firmware_dir("nucleo_f429zi")
+        err("  No operator-supplied Click firmware found.")
+        info(f"  Supply the image ({'/'.join(exts)}) via one of:")
+        info(f"    - set {CLICK_FW_ENV}=/path/to/firmware{exts[0]}, or")
+        info(f"    - drop the file in {fdir}")
+        return False
+    ok(f"  Firmware ready: {fw}")
+    _NUCLEO_FW_PATH["path"] = fw
+    return True
+
+
+def _dispatch_firmware_payload(fw: dict):
+    which = (fw.get("firmware") or "").strip().lower()
+    label = fw.get("label", "Flash Firmware")
+    if which in ("st-flash", "stflash"):
+        run_firmware_payload(
+            label,
+            info_fn=op_probe_info,
+            prepare_fn=lambda: _prep_nucleo_fw("stflash"),
+            flash_fn=lambda: _flash_stflash_bin(_NUCLEO_FW_PATH["path"], "0x08000000"),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Click companion firmware (.bin)",
+                "Flasher  : st-flash write @ 0x08000000",
+            ],
+        )
+    else:
+        run_firmware_payload(
+            label,
+            info_fn=op_probe_info,
+            prepare_fn=lambda: _prep_nucleo_fw("pyocd"),
+            flash_fn=lambda: _flash_firmware(_NUCLEO_FW_PATH["path"]),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Click companion firmware (.bin/.hex/.elf)",
+                f"Flasher  : pyocd FileProgrammer, target {PYOCD_TARGET}",
+            ],
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1270,6 +1364,12 @@ def main():
     ok("Nucleo-F429ZI detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-run (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     MENU_OPTIONS = [
         "Probe Info",

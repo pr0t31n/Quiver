@@ -46,6 +46,7 @@ from common import (
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update, get_firmware_dir,
+    download_firmware, selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -885,6 +886,126 @@ def check_firmware_version(port: str):
         warn("Could not check GitHub for firmware updates.")
 
 
+# ── Firmware payloads (main-page) ─────────────────────────────────────────────
+
+# firmware key → (subdir, raw download URL, filename, default label).
+# Firmware from Koenkk/Z-Stack-firmware (documented in op_flash_firmware).
+CC2531_FW = {
+    "Z-Stack-Coordinator": (
+        "coordinator",
+        "https://raw.githubusercontent.com/Koenkk/Z-Stack-firmware/master/"
+        "coordinator/Z-Stack_Home_1.2/bin/default/CC2531ZNP-Pro-Secure_LinkKeyJoin.hex",
+        "CC2531ZNP-Pro-Secure_LinkKeyJoin.hex",
+        "Flash Z-Stack Coordinator (Zigbee2MQTT)",
+    ),
+    "Zigbee-Sniffer": (
+        "sniffer",
+        "https://raw.githubusercontent.com/Koenkk/Z-Stack-firmware/master/"
+        "sniffer/bin/CC2531ZNP-sniffer.hex",
+        "CC2531ZNP-sniffer.hex",
+        "Flash Zigbee Sniffer firmware",
+    ),
+}
+
+
+def _cc2531_fw_variant_dir(subdir: str) -> Path:
+    return get_firmware_dir("cc2531") / subdir
+
+
+def _find_cc2531_hex(subdir: str):
+    d = _cc2531_fw_variant_dir(subdir)
+    if not d.exists():
+        return None
+    hexes = sorted(d.glob("*.hex"))
+    return hexes[-1] if hexes else None
+
+
+def _prep_cc2531_flash(name: str, staged: dict) -> bool:
+    """PREPARE step: ensure cc-tool is present (Linux only) and the firmware .hex
+    is downloaded (or operator-supplied) so only the write remains.
+    Returns True only when ready; False aborts before the confirm."""
+    if get_os_flavor() == "macos":
+        err("  cc-tool is Linux-only — flashing the CC2531 is not supported on macOS.")
+        info("  Use a Linux machine / VM / Raspberry Pi to flash, then return to macOS.")
+        return False
+
+    subdir, url, fname, _label = CC2531_FW[name]
+    ready = True
+
+    if not run_output("which cc-tool 2>/dev/null"):
+        info("  cc-tool not found — installing via apt…")
+        ensure_apt_packages(["cc-tool"])
+    if not run_output("which cc-tool 2>/dev/null"):
+        err("  cc-tool could not be installed — cannot flash.")
+        info("  Manual: sudo apt-get install cc-tool  (or build from dashesy/cc-tool)")
+        ready = False
+
+    if not _detect_cc_debugger():
+        warn("  CC Debugger (VID:PID 0451:16A6) not detected in lsusb.")
+        info("  Flashing requires a CC Debugger on the CC2531 10-pin debug header.")
+
+    hexf = _find_cc2531_hex(subdir)
+    if not hexf:
+        d = _cc2531_fw_variant_dir(subdir)
+        d.mkdir(parents=True, exist_ok=True)
+        dest = d / fname
+        info(f"  Downloading {name} firmware from Koenkk/Z-Stack-firmware…")
+        if download_firmware(url, dest, f"CC2531 {name}") and dest.exists():
+            hexf = dest
+    if hexf and Path(hexf).exists():
+        ok(f"  Firmware ready: {hexf}")
+        staged["hex"] = str(hexf)
+    else:
+        err(f"  {name} firmware .hex could not be sourced automatically.")
+        info(f"  Drop the .hex into: {_cc2531_fw_variant_dir(subdir)}")
+        info("  Source: https://github.com/Koenkk/Z-Stack-firmware")
+        ready = False
+    return ready
+
+
+def _flash_cc2531(staged: dict):
+    """FLASH step: reuse the cc-tool writer (identical to op_flash_firmware)."""
+    hexf = staged.get("hex")
+    if not hexf or not Path(hexf).exists():
+        err("Firmware .hex missing at flash time — aborting.")
+        return
+    cmd = ["cc-tool", "-e", "-w", str(hexf), "-v"]
+    info(f"Running: {' '.join(cmd)}")
+    try:
+        rc = run_streaming(cmd, on_line=lambda l: info(f"  cc-tool: {l}"), timeout=180)
+        if rc == 0:
+            ok("Firmware flashed and verified successfully!")
+            info("Unplug and replug the CC2531 USB dongle to boot the new firmware.")
+        else:
+            err(f"cc-tool exited with code {rc}. Flashing failed.")
+    except FileNotFoundError:
+        err("cc-tool binary not found even after install attempt.")
+    except Exception as e:
+        err(f"cc-tool execution error: {e}")
+
+
+def _dispatch_firmware_payload(fw: dict):
+    """Route a selected .qfw firmware payload to the right CC2531 firmware."""
+    name = fw.get("firmware", "")
+    if name not in CC2531_FW:
+        err(f"Unknown CC2531 firmware payload: {name!r}")
+        info(f"  Supported: {', '.join(CC2531_FW)}")
+        return
+    _subdir, _url, _fname, deflabel = CC2531_FW[name]
+    staged: dict = {}
+    run_firmware_payload(
+        fw.get("label", deflabel),
+        info_fn=None,
+        prepare_fn=lambda: _prep_cc2531_flash(name, staged),
+        flash_fn=lambda: _flash_cc2531(staged),
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : {name} (Koenkk/Z-Stack-firmware)",
+            "Flasher  : cc-tool -e -w <hex> -v  (via CC Debugger, 10-pin header)",
+        ],
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -973,6 +1094,12 @@ def main():
     info("")
 
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     # ── Main menu ─────────────────────────────────────────────────────────────
     MENU_OPTIONS = [

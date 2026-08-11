@@ -1399,19 +1399,49 @@ UNIFLASH_URL_LINUX = ("https://dr-download.ti.com/software-development/software-
                       "MD-QeJBJLj8gq/9.6.0/uniflash_sl.9.6.0.5764.run")
 UNIFLASH_PREFIX = f"/opt/ti/uniflash_{UNIFLASH_VERSION}"
 
+# Full XDS110 2-pin cJTAG target config for CC13xx/CC26xx. A minimal ccxml (bare
+# XDS110 connection + device instance) makes dslite fail with "An invalid processor
+# ID has been found / Can't generate board data file" — it lacks the cJTAG mode
+# property and the ICEPick_C→CS_DAP→CortexM driver/router tree these parts require.
+# This mirrors TI's shipped cc13xx_cc26xx_2pin_cJTAG_XDS110.ccxml (which hard-codes
+# CC1310/Cortex-M3); the device instance is parameterised so the correct silicon
+# (CC1352P1F3 = Cortex-M4F, CC2652R1F, …) is programmed. Verified flashing a
+# LAUNCHXL-CC1352P-4 end-to-end.
 _CCXML_TEMPLATE = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <configurations XML_version="1.2" id="configurations_0">
-    <configuration XML_version="1.2" id="configuration_0">
-        <instance XML_version="1.2" desc="Texas Instruments XDS110 USB Debug Probe" href="connections/TIXDS110_Connection.xml" id="Texas Instruments XDS110 USB Debug Probe" xml="TIXDS110_Connection.xml" xmlpath="connections"/>
-        <connection XML_version="1.2" id="Texas Instruments XDS110 USB Debug Probe">
+<configuration XML_version="1.2" id="Texas Instruments XDS110 USB Debug Probe_0">
+        <instance XML_version="1.2" desc="Texas Instruments XDS110 USB Debug Probe_0" href="connections/TIXDS110_Connection.xml" id="Texas Instruments XDS110 USB Debug Probe_0" xml="TIXDS110_Connection.xml" xmlpath="connections"/>
+        <connection XML_version="1.2" id="Texas Instruments XDS110 USB Debug Probe_0">
+            <instance XML_version="1.2" href="drivers/tixds510icepick_c.xml" id="drivers" xml="tixds510icepick_c.xml" xmlpath="drivers"/>
+            <instance XML_version="1.2" href="drivers/tixds510cs_dap.xml" id="drivers" xml="tixds510cs_dap.xml" xmlpath="drivers"/>
+            <instance XML_version="1.2" href="drivers/tixds510cortexM.xml" id="drivers" xml="tixds510cortexM.xml" xmlpath="drivers"/>
+            <property Type="choicelist" Value="4" id="SWD Mode Settings">
+                <choice Name="cJTAG (1149.7) 2-pin advanced modes" value="enable">
+                    <property Type="choicelist" Value="1" id="XDS110 Aux Port"/>
+                </choice>
+            </property>
             <platform XML_version="1.2" id="platform_0">
-                <instance XML_version="1.2" desc="{device}" href="devices/{devxml}" id="{device}" xml="{devxml}" xmlpath="devices"/>
+                <instance XML_version="1.2" desc="{device}_0" href="devices/{devxml}" id="{device}_0" xml="{devxml}" xmlpath="devices"/>
+            <device HW_revision="1" XML_version="1.2" description="{devdesc}" id="{device}_0" partnum="{device}">
+                    <router HW_revision="1.0" XML_version="1.2" description="ICEPick_C Router" id="IcePick_C_0" isa="ICEPICK_C">
+                        <subpath id="subpath_0">
+                            <property Type="choicelist" Value="1" id="Custom Configuration"/>
+                            <router HW_revision="1.0" XML_version="1.2" description="CS_DAP Router" id="CS_DAP_0" isa="CS_DAP">
+                                <subpath id="subpath_1">
+                                    <property Type="choicelist" Value="1" id="Custom Configuration"/>
+                                </subpath>
+                            </router>
+                        </subpath>
+                    </router>
+                </device>
             </platform>
         </connection>
     </configuration>
 </configurations>
 '''
 _TI_DEVICE_XML = {"CC2652R1F": "cc2652r1f.xml", "CC1352P1F3": "cc1352p1f3.xml"}
+_TI_DEVICE_DESC = {"CC2652R1F": "SimpleLink(TM) CC2652R wireless MCU",
+                   "CC1352P1F3": "SimpleLink(TM) CC1352P wireless MCU"}
 
 
 def ensure_ti_uniflash(auto: bool = None) -> str:
@@ -1508,7 +1538,11 @@ def _install_uniflash_macos(url: str):
         return
     Path("/opt/ti").mkdir(parents=True, exist_ok=True)
     info(f"Running unattended UniFlash install → {UNIFLASH_PREFIX} …")
-    run_streaming([stub, "-q", "-dir", UNIFLASH_PREFIX],
+    # The macOS UniFlash installer is a Bitrock/InstallBuilder bundle — same
+    # engine as the Linux .run — so it takes GNU-style --mode/--prefix options
+    # (NOT the -q/-dir syntax).
+    run_streaming([stub, "--mode", "unattended", "--unattendedmodeui", "none",
+                   "--prefix", UNIFLASH_PREFIX],
                   on_line=lambda l: info(f"  uniflash: {l}"), timeout=1800)
 
 
@@ -1526,8 +1560,10 @@ def ensure_ti_ccxml(device: str, ccxml_env: str = "QUIVER_DSLITE_CCXML") -> str:
         cfg_dir = get_firmware_dir("ti_uniflash")
         cfg_dir.mkdir(parents=True, exist_ok=True)
     devxml = _TI_DEVICE_XML.get(device, device.lower() + ".xml")
+    devdesc = _TI_DEVICE_DESC.get(device, device)
     ccxml = cfg_dir / f"{device}.ccxml"
-    ccxml.write_text(_CCXML_TEMPLATE.format(device=device, devxml=devxml))
+    ccxml.write_text(_CCXML_TEMPLATE.format(device=device, devxml=devxml,
+                                            devdesc=devdesc))
     os.environ[ccxml_env] = str(ccxml)
     info(f"Generated dslite target config: {ccxml}")
     return str(ccxml)
@@ -2165,14 +2201,21 @@ def download_firmware(url: str, dest: Path, tool_name: str = "",
     Tries requests (streaming) first, falls back to urllib, then curl/wget.
     Shows progress info() lines.  Returns True on success.
     """
+    import shutil
     tool_name = tool_name or dest.name
     info(f"Downloading {dest.name} from {url} …")
     dest.parent.mkdir(parents=True, exist_ok=True)
 
+    # Some vendor download hosts (e.g. TI dr-download.ti.com) reject Python's
+    # default User-Agent with HTTP 403, so present a browser-like UA.
+    _UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+
     # ── Try requests ──────────────────────────────────────────────────────────
     try:
         import requests as _req
-        with _req.get(url, stream=True, timeout=timeout) as r:
+        with _req.get(url, stream=True, timeout=timeout,
+                      headers={"User-Agent": _UA}) as r:
             r.raise_for_status()
             total = int(r.headers.get("content-length", 0))
             downloaded = 0
@@ -2191,15 +2234,17 @@ def download_firmware(url: str, dest: Path, tool_name: str = "",
     # ── Try urllib ────────────────────────────────────────────────────────────
     try:
         import urllib.request as _urlreq
-        _urlreq.urlretrieve(url, str(dest))
+        _req_obj = _urlreq.Request(url, headers={"User-Agent": _UA})
+        with _urlreq.urlopen(_req_obj, timeout=timeout) as resp, open(dest, "wb") as f:
+            shutil.copyfileobj(resp, f)
         ok(f"Downloaded {dest.name} ({dest.stat().st_size // 1024} KB)")
         return True
     except Exception as e:
         warn(f"urllib download failed: {e}")
 
     # ── Try curl / wget ───────────────────────────────────────────────────────
-    for cli, args in [("curl", ["-fL", "-o", str(dest), url]),
-                      ("wget", ["-q", "-O", str(dest), url])]:
+    for cli, args in [("curl", ["-fL", "-A", _UA, "-o", str(dest), url]),
+                      ("wget", ["-q", "-U", _UA, "-O", str(dest), url])]:
         if shutil.which(cli):
             r = subprocess.run([cli] + args, capture_output=True)
             if r.returncode == 0 and dest.exists():

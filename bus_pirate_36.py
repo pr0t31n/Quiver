@@ -64,6 +64,8 @@ from common import (
     web_detect_loop, run_streaming,
     find_mounted_drive,
     check_latest_github_release, announce_firmware_update,
+    get_firmware_dir, get_github_release_asset_url,
+    download_firmware, selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -80,6 +82,15 @@ BAUD_RATE = 115200
 
 FIRMWARE_API_URL = "https://api.github.com/repos/BusPirate/Bus_Pirate/releases/latest"
 PIRATE_LOADER_REPO = "https://github.com/BusPirate/Bus_Pirate"
+BP36_FW_OWNER = "BusPirate"
+BP36_FW_REPO  = "Bus_Pirate"
+# Env override: operator-supplied .hex, or a release-asset name selector for
+# auto-download (BP v3.x releases carry several .hex variants).
+BP36_HEX_ENV  = "QUIVER_BP36_HEX"
+BP36_ASSET_ENV = "QUIVER_BP36_ASSET"
+
+# Resolved firmware .hex chosen by the payload prepare step, flashed by flash step.
+_BP36_FW_PATH = None
 
 CONNECT_INSTRUCTIONS = (
     "Bus Pirate v3.6 not detected.\n\n"
@@ -725,6 +736,16 @@ def op_firmware_update(port: str):
         if not confirm("Continue with non-.hex file?", default=False):
             return
 
+    if not confirm(f"Flash {hex_file.name} to Bus Pirate 3.6 via pirate-loader?", default=True):
+        info("Firmware update cancelled.")
+        return
+
+    _bp36_flash_hex(port, hex_file, loader)
+
+
+def _bp36_flash_hex(port: str, hex_file: Path, loader: str):
+    """Shared flash core: enter the PIC24 bootloader (if needed) and drive
+    pirate-loader to write the .hex. Reused by the menu op and the payload."""
     # Check current mode — enter bootloader if needed
     boot_port_str = ""
     if _is_bootloader_mode():
@@ -751,10 +772,6 @@ def op_firmware_update(port: str):
             boot_port_str = port
             info("  If pirate-loader fails, manually enter bootloader: unplug, hold reset, replug")
 
-    if not confirm(f"Flash {hex_file.name} to Bus Pirate 3.6 via pirate-loader?", default=True):
-        info("Firmware update cancelled.")
-        return
-
     cmd = f"{loader} -p {boot_port_str} --hex {hex_file}"
     info(f"Running: {cmd}")
     info("  This process typically takes 15-60 seconds.")
@@ -778,6 +795,86 @@ def op_firmware_update(port: str):
     except Exception as e:
         err(f"Firmware update error: {e}")
         info(f"  Debug: dmesg | tail -20  and  ls -la {boot_port_str}")
+
+
+def _bp36_locate_hex() -> Path:
+    """Find an operator-supplied .hex (env override, then firmware dir)."""
+    env = os.environ.get(BP36_HEX_ENV, "").strip()
+    if env and Path(env).exists():
+        return Path(env)
+    fdir = get_firmware_dir("bus_pirate_36")
+    if fdir.exists():
+        hexes = sorted(fdir.rglob("*.hex"))
+        if hexes:
+            return hexes[-1]
+    return None
+
+
+def _prep_bp36_firmware(port: str) -> bool:
+    """Firmware-payload PREPARE: obtain a Bus Pirate v3.x .hex (operator-supplied
+    or downloaded from the official BusPirate/Bus_Pirate release) AND make sure
+    pirate-loader is built/available. Returns True only when the sole remaining
+    step is the flash write."""
+    global _BP36_FW_PATH
+    fdir = get_firmware_dir("bus_pirate_36")
+    fdir.mkdir(parents=True, exist_ok=True)
+
+    hex_file = _bp36_locate_hex()
+    if not hex_file:
+        # BP v3.x releases carry several .hex variants (base/community, different
+        # bootloader offsets), so the operator must name the asset to avoid
+        # flashing the wrong image.
+        asset = os.environ.get(BP36_ASSET_ENV, "").strip()
+        if not asset:
+            err("  No Bus Pirate v3.x .hex found and no asset selected.")
+            info(f"  The official release ships multiple .hex variants, so the correct")
+            info(f"  image cannot be guessed. Either:")
+            info(f"    - drop the correct .hex in {fdir} (or set {BP36_HEX_ENV}=/path/to.hex), or")
+            info(f"    - set {BP36_ASSET_ENV} to the release asset name selector (e.g. BPv3.6a).")
+            info(f"  Releases: https://github.com/{BP36_FW_OWNER}/{BP36_FW_REPO}/releases")
+            return False
+        tag, _ = check_latest_github_release(BP36_FW_OWNER, BP36_FW_REPO)
+        url = get_github_release_asset_url(BP36_FW_OWNER, BP36_FW_REPO, tag,
+                                           rf".*{asset}.*\.hex$")
+        if not url:
+            err(f"  No .hex asset matching '{asset}' in release {tag or '(latest)'}.")
+            info(f"  Check asset names: https://github.com/{BP36_FW_OWNER}/{BP36_FW_REPO}/releases")
+            return False
+        dest = fdir / url.rsplit("/", 1)[-1]
+        if not download_firmware(url, dest, tool_name="Bus Pirate v3.x firmware"):
+            err("  Firmware download failed — see output above.")
+            return False
+        hex_file = dest
+    ok(f"  Firmware ready: {hex_file}")
+
+    loader = _find_pirate_loader()
+    if not loader:
+        info("  pirate-loader not found — building it from source…")
+        loader = _install_pirate_loader()
+    if not loader:
+        err("  pirate-loader unavailable — cannot flash. Build it manually: "
+            f"{PIRATE_LOADER_REPO}")
+        return False
+    ok(f"  Flasher ready (pirate-loader): {loader}")
+
+    _BP36_FW_PATH = hex_file
+    _BP36_LOADER["path"] = loader
+    return True
+
+
+_BP36_LOADER = {"path": ""}
+
+
+def _flash_bp36_firmware(port: str):
+    """Firmware-payload FLASH: everything is prepped — drive pirate-loader."""
+    if not _BP36_FW_PATH or not Path(_BP36_FW_PATH).exists():
+        err("Firmware .hex missing at flash time — aborting.")
+        return
+    loader = _BP36_LOADER.get("path") or _find_pirate_loader()
+    if not loader:
+        err("pirate-loader missing at flash time — aborting.")
+        return
+    _bp36_flash_hex(port, Path(_BP36_FW_PATH), loader)
 
 
 def check_firmware_version(port: str):
@@ -875,6 +972,23 @@ def main():
         ok("Device is in normal application mode (REPL available).")
 
     _check_dialout(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        run_firmware_payload(
+            fw.get("label", "Firmware Update (pirate-loader)"),
+            info_fn=lambda: op_device_info(port),
+            prepare_fn=lambda: _prep_bp36_firmware(port),
+            flash_fn=lambda: _flash_bp36_firmware(port),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                f"Firmware : {fw.get('firmware', 'Bus_Pirate .hex')} (Intel HEX)",
+                f"Port     : {port}",
+                "Flasher  : pirate-loader over the PIC24 bootloader",
+            ],
+        )
+        return
 
     MENU_OPTIONS = [
         "Device Info (i)",

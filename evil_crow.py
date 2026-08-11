@@ -48,6 +48,8 @@ from common import (
     find_mounted_drive,
     detect_usb_libusb_any,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, get_github_release_asset_url, download_firmware,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -806,6 +808,147 @@ def check_firmware_version():
         warn("Could not check GitHub.")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ") ───────────────────────────────
+
+ESP_CHIP       = "esp32"
+MARAUDER_OWNER = "justcallmekoko"
+MARAUDER_REPO  = "ESP32Marauder"
+EC_OWNER       = "joelsernamoreno"
+EC_REPO        = "EvilCrowRF-V2"
+
+
+def _fw_user_dir() -> Path:
+    d = get_firmware_dir("evil_crow") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _esptool(args, timeout=180):
+    cmd = [sys.executable, "-m", "esptool"] + args
+    info(f"Running: {' '.join(cmd)}")
+    return run_streaming(cmd, on_line=lambda l: info(f"  esptool: {l}"), timeout=timeout)
+
+
+def _download_release_asset(owner, repo, patterns, dest_dir, what):
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tag, _ = check_latest_github_release(owner, repo)
+    for pat in patterns:
+        url = get_github_release_asset_url(owner, repo, tag or "", pat)
+        if url:
+            fname = url.rsplit("/", 1)[-1]
+            dest = dest_dir / fname
+            if dest.exists() and dest.stat().st_size > 0:
+                ok(f"  {what} already present: {dest.name}")
+                return dest
+            if download_firmware(url, dest, what):
+                return dest
+    return None
+
+
+def _run_ecrf_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("evil_crow") / "ecrf"
+
+    def prep():
+        if not port:
+            err("  No USB serial port for the Evil Crow RF — connect it via USB (CP2102).")
+            return False
+        binf = _download_release_asset(EC_OWNER, EC_REPO, [r"\.bin$"], dest, "Evil Crow RF firmware")
+        if not binf:
+            d = _fw_user_dir()
+            bins = sorted(d.glob("*.bin"))
+            binf = bins[0] if len(bins) == 1 else None
+            if not binf:
+                err("  No Evil Crow RF firmware .bin auto-sourced or supplied.")
+                err(f"  Download from https://github.com/{EC_OWNER}/{EC_REPO}/releases and drop it into:")
+                err(f"    {d}")
+                return False
+        state["fw"] = binf
+        ok(f"  Firmware ready: {binf}")
+        return True
+
+    def flash():
+        _esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "460800",
+            "--before", "default_reset", "--after", "hard_reset",
+            "write_flash", "--flash_size", "detect",
+            "0x0", str(state["fw"]),
+        ], timeout=180)
+
+    run_firmware_payload(
+        fw.get("label", "Update Evil Crow RF firmware"),
+        info_fn=op_device_info,
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : Evil Crow RF V2 ({EC_OWNER}/{EC_REPO}) merged image → 0x0",
+            f"Port     : {port or 'not detected'}",
+        ],
+    )
+
+
+def _run_marauder_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("evil_crow") / "marauder"
+
+    def prep():
+        if not port:
+            err("  No USB serial port for the Evil Crow RF — connect it via USB (CP2102).")
+            return False
+        binf = _download_release_asset(
+            MARAUDER_OWNER, MARAUDER_REPO,
+            [r"esp32_marauder.*generic.*\.bin",
+             r"esp32_marauder_v\d[^/]*\.bin",
+             r"esp32_marauder[^/]*\.bin"],
+            dest, "ESP32 Marauder firmware")
+        if not binf:
+            err("  Could not fetch an ESP32 Marauder firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MARAUDER_OWNER}/{MARAUDER_REPO}/releases")
+            return False
+        blf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"bootloader[^/]*\.bin"], dest, "bootloader")
+        ptf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"partitions[^/]*\.bin"], dest, "partitions")
+        b0f = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"boot_app0[^/]*\.bin"], dest, "boot_app0")
+        if blf and ptf and b0f:
+            state["files"] = [("0x1000", str(blf)), ("0x8000", str(ptf)),
+                              ("0xe000", str(b0f)), ("0x10000", str(binf))]
+            ok("  Full Marauder image set ready.")
+        else:
+            state["files"] = [("0x10000", str(binf))]
+            warn("  Only the Marauder firmware image was available; flashing app slot at 0x10000.")
+            warn("  A first-time/clean install may also require bootloader/partitions/boot_app0.")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "460800",
+                "write_flash", "--flash_size", "detect"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _esptool(args, timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32 Marauder"),
+        info_fn=op_device_info,
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : ESP32 Marauder ({MARAUDER_OWNER}/{MARAUDER_REPO})",
+            f"Port     : {port or 'not detected'}",
+        ],
+    )
+
+
+def _dispatch_firmware_payload(fw, port):
+    name = fw.get("firmware", "")
+    if name == "Marauder":
+        _run_marauder_payload(fw, port)
+    elif name == "EvilCrowRF":
+        _run_ecrf_payload(fw, port)
+    else:
+        err(f"Unknown firmware payload '{name}' for {TOOL_NAME}.")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -867,6 +1010,12 @@ def main():
         ok("Evil Crow RF V2 detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, find_serial_port_by_vidpid(VID_PIDS))
+        return
 
     MENU_OPTIONS = [
         "Device Info",

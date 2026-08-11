@@ -25,6 +25,7 @@ from common import (
     require_sudo, sudo_run,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    get_firmware_dir, selected_firmware_payload, run_firmware_payload,
 )
 
 
@@ -244,6 +245,12 @@ def op_flash_bin():
         err(f"File not found: {fw_path}")
         return
     address = prompt("Flash start address (hex)", default="0x08000000")
+    _flash_bin_core(fw_path, address)
+
+
+def _flash_bin_core(fw_path: str, address: str = "0x08000000") -> bool:
+    """Shared st-flash core: write a raw .bin at *address*. Reused by the menu op
+    and the firmware payload."""
     info(f"Running: st-flash write {fw_path} {address}")
     info("Expected: progress output showing pages written, then verification result.")
     rc = run_streaming(
@@ -252,13 +259,14 @@ def op_flash_bin():
     )
     if rc == 0:
         ok("st-flash write complete.")
-    else:
-        err(f"st-flash exited with code {rc}.")
-        info("Troubleshooting flash failures:")
-        info("  - 'STLINK_SWDCLK_TOO_FAST': add --freq=100k to slow down")
-        info("  - 'Flash locked / option bytes': erase with mass-erase first")
-        info("  - 'Target voltage': check that target VCC is present")
-        info("  - Verify address matches target flash start (0x08000000 for most STM32)")
+        return True
+    err(f"st-flash exited with code {rc}.")
+    info("Troubleshooting flash failures:")
+    info("  - 'STLINK_SWDCLK_TOO_FAST': add --freq=100k to slow down")
+    info("  - 'Flash locked / option bytes': erase with mass-erase first")
+    info("  - 'Target voltage': check that target VCC is present")
+    info("  - Verify address matches target flash start (0x08000000 for most STM32)")
+    return False
 
 
 def op_flash_hex_elf():
@@ -405,6 +413,107 @@ def op_install_udev():
     _install_stlink_udev()
 
 
+# ── Firmware payload wiring ────────────────────────────────────────────────────
+#
+# The ST-Link V2 *probe* firmware is updated only by ST's proprietary STSW-LINK007
+# GUI (Windows/Java) — the module cannot drive that and MUST NOT invent a command.
+# The main-page firmware payloads therefore reuse the module's existing target-
+# flash paths (st-flash / pyocd) against an operator-supplied image: prepare
+# locates the image (env override or firmware dir) and aborts BEFORE the
+# confirmation if none is present.
+
+STLINK_FW_ENV     = "QUIVER_STLINK_FW"      # operator-supplied firmware path
+STLINK_TARGET_ENV = "QUIVER_STLINK_TARGET"  # pyocd target (e.g. stm32f103c8)
+
+_STLINK_FW_PATH = {"path": ""}
+
+
+def _stlink_locate_fw(exts) -> str:
+    import os
+    env = os.environ.get(STLINK_FW_ENV, "").strip()
+    if env and os.path.exists(env) and env.lower().endswith(tuple(exts)):
+        return env
+    fdir = get_firmware_dir("stlink_v2")
+    if fdir.exists():
+        cands = sorted(p for e in exts for p in fdir.rglob(f"*{e}"))
+        if cands:
+            return str(cands[-1])
+    return ""
+
+
+def _prep_stlink_fw(kind: str) -> bool:
+    """Firmware-payload PREPARE: locate the operator-supplied image and confirm
+    the flasher (and, for pyocd, a target MCU) are available. Returns True only
+    when the sole remaining step is the write; False aborts before confirm."""
+    global current_target
+    import os
+    if kind == "stflash":
+        exts = (".bin",)
+        if not ensure_system_tool(
+            "st-flash", "apt install stlink-tools  (Kali/Debian/Ubuntu)",
+            apt_pkg="stlink-tools",
+        ):
+            err("  st-flash unavailable — install stlink-tools.")
+            return False
+    else:
+        exts = (".hex", ".elf", ".bin")
+        try:
+            import pyocd  # noqa: F401
+        except ImportError:
+            err("  pyocd not installed — run: pip install pyocd --break-system-packages")
+            return False
+        tgt = os.environ.get(STLINK_TARGET_ENV, "").strip() or current_target
+        if not tgt:
+            err("  No pyocd target MCU set for a headless flash.")
+            info(f"    Set {STLINK_TARGET_ENV} to the target (e.g. stm32f103c8) — pyocd")
+            info("    needs it to pick the flash algorithm.")
+            return False
+        current_target = tgt.lower()
+        ok(f"  pyocd target: {current_target}")
+
+    fw = _stlink_locate_fw(exts)
+    if not fw:
+        fdir = get_firmware_dir("stlink_v2")
+        err("  No operator-supplied firmware image found.")
+        info(f"  Supply it ({'/'.join(exts)}) via one of:")
+        info(f"    - set {STLINK_FW_ENV}=/path/to/firmware{exts[0]}, or")
+        info(f"    - drop the file in {fdir}")
+        return False
+    ok(f"  Firmware ready: {fw}")
+    _STLINK_FW_PATH["path"] = fw
+    return True
+
+
+def _dispatch_firmware_payload(fw: dict):
+    which = (fw.get("firmware") or "").strip().lower()
+    label = fw.get("label", "Flash Firmware")
+    if which in ("st-flash", "stflash"):
+        run_firmware_payload(
+            label,
+            info_fn=op_probe_info,
+            prepare_fn=lambda: _prep_stlink_fw("stflash"),
+            flash_fn=lambda: _flash_bin_core(_STLINK_FW_PATH["path"], "0x08000000"),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : operator-supplied target image (.bin)",
+                "Flasher  : st-flash write @ 0x08000000",
+            ],
+        )
+    else:
+        run_firmware_payload(
+            label,
+            info_fn=op_probe_info,
+            prepare_fn=lambda: _prep_stlink_fw("pyocd"),
+            flash_fn=lambda: _run_pyocd(["flash", "-t", current_target, _STLINK_FW_PATH["path"]],
+                                        timeout=120),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : operator-supplied target image (.hex/.elf/.bin)",
+                "Flasher  : pyocd flash -t <target>",
+            ],
+        )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -440,6 +549,12 @@ def main():
     ok("ST-Link detected.")
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-run (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     MENU_OPTIONS = [
         "Probe Info",

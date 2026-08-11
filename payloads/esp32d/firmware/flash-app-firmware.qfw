@@ -1,0 +1,1 @@
+{"type":"firmware_flash","board":"ESP32-D","firmware":"Application","label":"Flash application firmware (merged .bin -> 0x10000)"}

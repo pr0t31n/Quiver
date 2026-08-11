@@ -28,6 +28,8 @@ from common import (
     find_serial_port_by_vidpid, ensure_apt_packages, ensure_pip_packages,
     ensure_system_tool, require_sudo, sudo_run,
     web_detect_loop, run_streaming,
+    get_firmware_dir, download_firmware, get_github_release_asset_url,
+    selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -363,6 +365,129 @@ def op_network_channel_info(port: str):
         err("Timed out waiting for network channel info (30s).")
 
 
+# ── Firmware payloads (main-page) ─────────────────────────────────────────────
+
+# firmware key → dict(subdir, owner, repo, asset-name patterns, source URL, label).
+# Coordinator: NabuCasa/silabs-firmware-builder (documented in op_flash_firmware).
+# Router:      darkxst/silabs-firmware EFR32MG21 router build.
+ZBDONGLE_FW = {
+    "EmberZNet-Coordinator": {
+        "subdir": "coordinator",
+        "owner": "NabuCasa", "repo": "silabs-firmware-builder",
+        "patterns": [r"zbdongle.?e.*ncp.*\.gbl$",
+                     r"zbdongle.?e.*coordinator.*\.gbl$",
+                     r"zbdongle.?e.*\.gbl$"],
+        "src": "https://github.com/NabuCasa/silabs-firmware-builder/releases",
+        "label": "Flash EmberZNet Coordinator (NCP)",
+    },
+    "EmberZNet-Router": {
+        "subdir": "router",
+        "owner": "darkxst", "repo": "silabs-firmware",
+        "patterns": [r"zbdongle.?e.*router.*\.gbl$",
+                     r".*router.*efr32mg21.*\.gbl$",
+                     r".*zbdongle.?e.*\.gbl$"],
+        "src": "https://github.com/darkxst/silabs-firmware",
+        "label": "Flash EmberZNet Router firmware",
+    },
+}
+
+
+def _zbdongle_fw_variant_dir(subdir: str) -> Path:
+    return get_firmware_dir("sonoff_zbdongle_e") / subdir
+
+
+def _find_zbdongle_gbl(subdir: str):
+    d = _zbdongle_fw_variant_dir(subdir)
+    if not d.exists():
+        return None
+    gbls = sorted(d.glob("*.gbl"))
+    return gbls[-1] if gbls else None
+
+
+def _download_zbdongle_firmware(name: str):
+    """Try to fetch the .gbl from the documented release. EFR32 .gbl asset names
+    are not standardised, so this is best-effort. Returns the .gbl Path or None."""
+    spec = ZBDONGLE_FW[name]
+    d = _zbdongle_fw_variant_dir(spec["subdir"])
+    d.mkdir(parents=True, exist_ok=True)
+    for pat in spec["patterns"]:
+        url = get_github_release_asset_url(spec["owner"], spec["repo"], "", pat)
+        if url:
+            dest = d / url.split("/")[-1]
+            if download_firmware(url, dest, f"ZBDongle-E {name}") and dest.exists():
+                return dest
+    return None
+
+
+def _prep_zbdongle_flash(name: str, staged: dict) -> bool:
+    """PREPARE step: ensure universal-silabs-flasher is present and the .gbl is
+    ready (downloaded or operator-supplied). Returns True only when ready; False
+    aborts before the confirm."""
+    ready = True
+    if not _check_flasher():
+        err("  universal-silabs-flasher not available — cannot flash.")
+        info("  Install: pip install universal-silabs-flasher --break-system-packages")
+        ready = False
+
+    gbl = _find_zbdongle_gbl(ZBDONGLE_FW[name]["subdir"]) or _download_zbdongle_firmware(name)
+    if gbl and Path(gbl).exists():
+        ok(f"  Firmware ready: {gbl}")
+        staged["gbl"] = str(gbl)
+    else:
+        err(f"  {name} .gbl firmware could not be sourced automatically.")
+        info(f"  Drop the EmberZNet .gbl into: {_zbdongle_fw_variant_dir(ZBDONGLE_FW[name]['subdir'])}")
+        info(f"  Source: {ZBDONGLE_FW[name]['src']}")
+        ready = False
+    return ready
+
+
+def _flash_zbdongle(port: str, staged: dict):
+    """FLASH step: reuse the universal-silabs-flasher writer (identical to
+    op_flash_firmware)."""
+    gbl = staged.get("gbl")
+    if not gbl or not Path(gbl).exists():
+        err("Firmware .gbl missing at flash time — aborting.")
+        return
+    cmd = [
+        "universal-silabs-flasher",
+        "--device", port,
+        "--bootloader-reset", "rts_dtr",
+        "flash",
+        "--firmware", str(gbl),
+    ]
+    info(f"Running: {' '.join(cmd)}")
+    try:
+        run_streaming(cmd, on_line=lambda l: info(l), timeout=180)
+        ok("Firmware flash complete.")
+        info("After flashing, the dongle will reset. Wait a few seconds before probing.")
+    except Exception as e:
+        err(f"Firmware flash failed: {e}")
+
+
+def _dispatch_firmware_payload(fw: dict, port: str):
+    """Route a selected .qfw firmware payload to the right EmberZNet variant."""
+    name = fw.get("firmware", "")
+    if name not in ZBDONGLE_FW:
+        err(f"Unknown ZBDongle-E firmware payload: {name!r}")
+        info(f"  Supported: {', '.join(ZBDONGLE_FW)}")
+        return
+    spec = ZBDONGLE_FW[name]
+    staged: dict = {}
+    run_firmware_payload(
+        fw.get("label", spec["label"]),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=lambda: _prep_zbdongle_flash(name, staged),
+        flash_fn=lambda: _flash_zbdongle(port, staged),
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : {name} (EFR32MG21 EmberZNet .gbl)",
+            f"Source   : {spec['src']}",
+            f"Port     : {port}",
+            "Flasher  : universal-silabs-flasher --bootloader-reset rts_dtr flash",
+        ],
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -400,6 +525,12 @@ def main():
 
     ok(f"Connected on {port}")
     _warn_macos_driver(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Device Info",

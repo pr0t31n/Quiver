@@ -28,6 +28,8 @@ from common import (
     detect_usb_device, find_mounted_drive,
     detection_loop, get_filesystem_type,
     get_selected_payload, verify_device_connection,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, run_streaming,
 )
 
 
@@ -364,6 +366,144 @@ def deploy_payload(drive: Path) -> bool:
         return True
 
 
+# ── Firmware payload (main-page "FIRMWARE - ..." auto-flash) ──────────────────
+# The 2022 USB Rubber Ducky (RP2040/Apple-VID) must NOT be firmware-flashed —
+# doing so bricks it (see FIRMWARE_NOTE). This module only guides. The one
+# legitimate flash path is the ORIGINAL v1 Rubber Ducky (2010, Atmel AT32UC3
+# behind an Atmel DFU bootloader, VID 03EB), which is written over DFU with an
+# operator-supplied image. Per the guided-only rule, prepare_fn locates that
+# operator image and CONFIRMS the legacy DFU device — it aborts BEFORE the
+# confirmation if either is missing, so the 2022 model can never be flashed here.
+#   Atmel DFU tooling — dfu-programmer (http://dfu-programmer.github.io/)
+
+VID_ATMEL_DFU = "03EB"          # Atmel DFU bootloader (original v1 Ducky)
+DFU_TARGET    = "at32uc3b1256"  # AT32UC3B1256 MCU on the original Ducky
+
+
+def _fw_dir() -> Path:
+    d = get_firmware_dir("usb_rubber_ducky")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _find_operator_image():
+    """Newest operator-supplied .hex/.bin firmware image, or None."""
+    cands = []
+    for pat in ("*.hex", "*.bin"):
+        cands.extend(sorted(_fw_dir().glob(pat)))
+    return cands[-1] if cands else None
+
+
+def _fetch_legacy_firmware():
+    """Auto-source a legacy-v1 (Atmel AT32UC3) Ducky firmware from the canonical
+    public repo (hak5darren/USB-Rubber-Ducky), which carries the well-known
+    community firmwares — notably 'Twin Duck' (composite HID + Mass Storage).
+    Shallow-clones into the tool firmware dir and returns a prebuilt .hex, or None
+    if the repo ships only source (then the operator supplies a built image).
+
+    SAFE because the ONLY caller (_prep_legacy_firmware) has already confirmed an
+    original-v1 Ducky in Atmel DFU mode (VID 03EB); the 2022 model is never here."""
+    import shutil
+    if not shutil.which("git"):
+        return None
+    src = _fw_dir() / "hak5_src"
+    try:
+        if not (src / ".git").exists():
+            info("  Fetching legacy Ducky firmware (git clone hak5darren/USB-Rubber-Ducky)…")
+            if run(f"git clone --depth 1 https://github.com/hak5darren/USB-Rubber-Ducky '{src}'").returncode != 0:
+                return None
+    except Exception:
+        return None
+    hexes = sorted(src.rglob("*.hex"))
+    if not hexes:
+        return None
+    # Prefer Twin Duck / composite builds by name; else newest .hex found.
+    pref = [p for p in hexes if any(k in p.name.lower()
+            for k in ("twin", "duck", "composite"))]
+    return (pref or hexes)[-1]
+
+
+def _ensure_dfu_programmer() -> str:
+    p = run_output("which dfu-programmer 2>/dev/null")
+    if p and p.strip():
+        return p.strip()
+    info("  dfu-programmer not found — attempting install…")
+    if get_os_flavor() == "macos":
+        run("brew install dfu-programmer")
+    else:
+        sudo_run("apt-get install -y dfu-programmer")
+    p = run_output("which dfu-programmer 2>/dev/null")
+    return p.strip() if (p and p.strip()) else ""
+
+
+def _fw_device_info():
+    heading("Device Info")
+    info(f"Board : {TOOL_NAME}")
+    info("Firmware flashing applies ONLY to the original v1 Ducky (Atmel DFU, VID 03EB).")
+    info("The 2022 model is NOT firmware-flashable — flashing bricks it.")
+
+
+def _prep_legacy_firmware(staged) -> bool:
+    if not detect_usb_device(VID_ATMEL_DFU):
+        err("  No original-v1 Ducky in Atmel DFU mode (VID 03EB) detected — aborting.")
+        warn("  Refusing to flash: the 2022 model bricks if flashed. Only the legacy")
+        warn("  v1 Ducky (2010, AT32UC3) in DFU mode is supported here.")
+        return False
+    img = _find_operator_image() or _fetch_legacy_firmware()
+    if not img:
+        err("  No firmware image (operator-supplied or auto-sourced) — aborting before the flash.")
+        info(f"  Place a v1 Ducky .hex/.bin in {_fw_dir()}, or ensure git can reach")
+        info("  https://github.com/hak5darren/USB-Rubber-Ducky (Twin Duck firmware).")
+        return False
+    dfu = _ensure_dfu_programmer()
+    if not dfu:
+        err("  dfu-programmer could not be installed — aborting before the flash.")
+        info("  Install: http://dfu-programmer.github.io/")
+        return False
+    staged["dfu"] = dfu
+    staged["img"] = img
+    ok(f"  Ready: dfu-programmer + {img.name}  (target {DFU_TARGET})")
+    return True
+
+
+def _flash_legacy_firmware(staged):
+    img = staged["img"]
+    info(f"  Erasing {DFU_TARGET}…")
+    run_streaming(["dfu-programmer", DFU_TARGET, "erase"],
+                  on_line=lambda l: info(f"  dfu: {l}"), timeout=60)
+    info(f"  Flashing {img.name}…")
+    rc = run_streaming(["dfu-programmer", DFU_TARGET, "flash", str(img)],
+                       on_line=lambda l: info(f"  dfu: {l}"), timeout=120)
+    run_streaming(["dfu-programmer", DFU_TARGET, "start"],
+                  on_line=lambda l: info(f"  dfu: {l}"), timeout=30)
+    if rc == 0:
+        ok("  Legacy Ducky firmware written — the device will restart.")
+    else:
+        warn(f"  dfu-programmer flash exited with code {rc}.")
+
+
+def _dispatch_firmware_payload(fw: dict):
+    fw_name = fw.get("firmware", "")
+    label = fw.get("label", f"Flash {fw_name}")
+    staged: dict = {}
+    if fw_name == "Legacy v1 Firmware":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_legacy_firmware(staged),
+            flash_fn=lambda: _flash_legacy_firmware(staged),
+            summary_lines=[
+                "Board    : USB Rubber Ducky v1 (2010, Atmel AT32UC3, DFU)",
+                "Firmware : operator-supplied image (.hex/.bin)",
+                "Flasher  : dfu-programmer (erase → flash → start)",
+                "NOTE     : 2022 model is NOT flashable — this targets v1 only",
+            ],
+        )
+    else:
+        err(f"Unknown firmware payload: {fw_name!r}")
+        info("  Supported: Legacy v1 Firmware")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -373,6 +513,12 @@ def main():
 
     # Firmware warning
     print(FIRMWARE_NOTE)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     # Step 1
     heading("Step 1 — Connect the USB Rubber Ducky")

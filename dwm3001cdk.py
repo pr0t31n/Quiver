@@ -69,8 +69,9 @@ from common import (
     require_sudo, sudo_run, sudo_output,
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
-    find_mounted_drive,
+    find_mounted_drive, get_firmware_dir,
     check_latest_github_release,
+    selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -831,6 +832,147 @@ def check_firmware_version():
         info("  QMatter repository may not be public. Check: https://www.qorvo.com/products/p/DWM3001CDK")
 
 
+# ── Firmware payloads (main-page) ─────────────────────────────────────────────
+
+def _dwm_fw_dir() -> Path:
+    return get_firmware_dir("dwm3001cdk")
+
+
+def _find_dwm_firmware(exts):
+    """Locate an operator-supplied firmware image (Qorvo UWB firmware is behind a
+    registration wall and cannot be auto-downloaded). Returns Path/None."""
+    d = _dwm_fw_dir()
+    if not d.exists():
+        return None
+    for ext in exts:
+        hits = sorted(d.glob(f"*{ext}"))
+        if hits:
+            return hits[-1]
+    return None
+
+
+def _prep_dwm_jlink(staged: dict) -> bool:
+    """PREPARE step (J-Link): ensure nrfjprog + J-Link are present and locate the
+    operator-supplied firmware .hex. Returns True only when ready."""
+    _dwm_fw_dir().mkdir(parents=True, exist_ok=True)
+    ready = True
+    if not _check_nrfjprog():
+        err("  nrfjprog not available — cannot flash via J-Link.")
+        ready = False
+    if not find_serial_port_by_vidpid(VID_PID_JLINK):
+        err("  J-Link debugger (1366:1015) not detected — connect the DWM3001CDK USB.")
+        ready = False
+    hexf = _find_dwm_firmware((".hex", ".bin"))
+    if hexf and Path(hexf).exists():
+        ok(f"  Firmware ready: {hexf}")
+        staged["hex"] = str(hexf)
+    else:
+        err("  Firmware .hex not found — the Qorvo UWB firmware requires registration")
+        info("  and cannot be auto-downloaded.")
+        info(f"  Drop the nRF52833 firmware .hex into: {_dwm_fw_dir()}")
+        info("  Source: Qorvo QMatter (https://github.com/Qorvo/QMatter/releases) or")
+        info(f"  the Qorvo UWB SDK ({QORVO_SDK_URL}, account required).")
+        ready = False
+    return ready
+
+
+def _flash_dwm_jlink(staged: dict):
+    """FLASH step (J-Link): reuse the nrfjprog writer from op_flash_jlink."""
+    hexf = staged.get("hex")
+    if not hexf or not Path(hexf).exists():
+        err("Firmware .hex missing at flash time — aborting.")
+        return
+    flash_cmd = f"nrfjprog --program {hexf} -f NRF52 --sectorerase"
+    info(f"Running: {flash_cmd}")
+    info("  Flashing via J-Link SWD. Do NOT disconnect during programming.")
+    r = run(flash_cmd)
+    if r.returncode == 0:
+        ok("Firmware flashed successfully via J-Link.")
+        info("Resetting nRF52833 via J-Link…")
+        run("nrfjprog --reset -f NRF52")
+    else:
+        err("nrfjprog flash failed. Check 'nrfjprog --ids' and J-Link connection.")
+
+
+def _prep_dwm_dfu(staged: dict) -> bool:
+    """PREPARE step (DFU): ensure nrfutil + the CDC port are present and locate the
+    operator-supplied DFU .zip package. Returns True only when ready."""
+    _dwm_fw_dir().mkdir(parents=True, exist_ok=True)
+    ready = True
+    if not _check_nrfutil():
+        err("  nrfutil not available — cannot flash via DFU.")
+        ready = False
+    cdc = find_serial_port_by_vidpid(VID_PID_CDC)
+    if not cdc:
+        err("  Nordic CDC UART (1915:521F) not detected — required for DFU flashing.")
+        ready = False
+    else:
+        staged["cdc"] = cdc
+    pkg = _find_dwm_firmware((".zip",))
+    if pkg and Path(pkg).exists():
+        ok(f"  DFU package ready: {pkg}")
+        staged["zip"] = str(pkg)
+    else:
+        err("  DFU .zip package not found — the Qorvo UWB firmware requires")
+        info("  registration and cannot be auto-downloaded.")
+        info(f"  Drop a DFU .zip into: {_dwm_fw_dir()}")
+        info("  Build one from a .hex: nrfutil pkg generate --hw-version 52 --sd-req 0x00 \\")
+        info("                             --application <firmware.hex> <output.zip>")
+        info(f"  Source: Qorvo QMatter / UWB SDK ({QORVO_SDK_URL}, account required).")
+        ready = False
+    return ready
+
+
+def _flash_dwm_dfu(staged: dict):
+    """FLASH step (DFU): reuse the nrfutil DFU writer from op_flash_dfu."""
+    pkg = staged.get("zip")
+    cdc = staged.get("cdc")
+    if not pkg or not Path(pkg).exists() or not cdc:
+        err("DFU package or CDC port missing at flash time — aborting.")
+        return
+    cmd = f"nrfutil dfu usb-serial -pkg {pkg} -p {cdc}"
+    info(f"Running: {cmd}")
+    info("  Do NOT disconnect the device during DFU flashing.")
+    r = run(cmd)
+    if r.returncode == 0:
+        ok("DFU flash completed successfully. Device will reboot and run new firmware.")
+    else:
+        err("nrfutil DFU flash failed — ensure the device is in DFU bootloader mode.")
+
+
+def _dispatch_firmware_payload(fw: dict):
+    """Route a selected .qfw firmware payload to the right flashing method."""
+    name = fw.get("firmware", "")
+    staged: dict = {}
+    if name == "Qorvo-UWB-JLink":
+        run_firmware_payload(
+            fw.get("label", "Flash via J-Link (nrfjprog)"),
+            info_fn=lambda: op_device_info(find_serial_port_by_vidpid(VID_PIDS)),
+            prepare_fn=lambda: _prep_dwm_jlink(staged),
+            flash_fn=lambda: _flash_dwm_jlink(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Qorvo UWB (nRF52833 .hex, operator-supplied)",
+                "Flasher  : nrfjprog --program <hex> -f NRF52 --sectorerase (J-Link SWD)",
+            ],
+        )
+    elif name == "Qorvo-UWB-DFU":
+        run_firmware_payload(
+            fw.get("label", "Flash via DFU (nrfutil)"),
+            info_fn=lambda: op_device_info(find_serial_port_by_vidpid(VID_PIDS)),
+            prepare_fn=lambda: _prep_dwm_dfu(staged),
+            flash_fn=lambda: _flash_dwm_dfu(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME}",
+                "Firmware : Qorvo UWB (DFU .zip package, operator-supplied)",
+                "Flasher  : nrfutil dfu usb-serial (nRF52833 CDC DFU bootloader)",
+            ],
+        )
+    else:
+        err(f"Unknown DWM3001CDK firmware payload: {name!r}")
+        info("  Supported: Qorvo-UWB-JLink, Qorvo-UWB-DFU")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -911,6 +1053,12 @@ def main():
         _check_dialout(cdc_p)
 
     check_firmware_version()
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     MENU_OPTIONS = [
         "Device Info",

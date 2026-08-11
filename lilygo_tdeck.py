@@ -47,6 +47,8 @@ from common import (
     ensure_apt_packages, ensure_brew_packages,
     web_detect_loop, run_streaming,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    get_firmware_dir, get_github_release_asset_url, download_firmware,
 )
 
 TOOL_NAME   = "LilyGo T-Deck"
@@ -478,6 +480,195 @@ def check_firmware_version(port: str):
         info(f"Latest MicroPython for ESP32-S3: {MICROPYTHON_URL}")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ") ───────────────────────────────
+
+MARAUDER_OWNER   = "justcallmekoko"
+MARAUDER_REPO    = "ESP32Marauder"
+MESHTASTIC_OWNER = "meshtastic"
+MESHTASTIC_REPO  = "firmware"
+MESHTASTIC_VARIANT_PATTERNS = [r"firmware-t-deck-(?!.*update)(?!.*tft)[^/]*\.bin"]
+
+
+def _fw_user_dir() -> Path:
+    d = get_firmware_dir("lilygo_tdeck") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _download_release_asset(owner, repo, patterns, dest_dir, what):
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tag, _ = check_latest_github_release(owner, repo)
+    for pat in patterns:
+        url = get_github_release_asset_url(owner, repo, tag or "", pat)
+        if url:
+            fname = url.rsplit("/", 1)[-1]
+            dest = dest_dir / fname
+            if dest.exists() and dest.stat().st_size > 0:
+                ok(f"  {what} already present: {dest.name}")
+                return dest
+            if download_firmware(url, dest, what):
+                return dest
+    return None
+
+
+def _run_app_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        f = d / "app.bin"
+        if not f.exists():
+            bins = sorted(d.glob("*.bin"))
+            f = bins[0] if len(bins) == 1 else None
+        if not f:
+            err("  No merged .bin found. Drop the T-Deck firmware as 'app.bin' into:")
+            err(f"    {d}")
+            return False
+        state["fw"] = f
+        ok(f"  Application firmware ready: {f}")
+        return True
+
+    def flash():
+        _run_esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "qio", "--flash_size", "detect",
+            "0x0", str(state["fw"]),
+        ], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash application firmware"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       "Firmware : operator-supplied merged .bin → 0x0",
+                       f"Port     : {port}"])
+
+
+def _run_micropython_payload(fw, port):
+    state = {}
+
+    def prep():
+        d = _fw_user_dir()
+        bins = sorted(d.glob("*micropython*.bin")) or sorted(d.glob("ESP32_GENERIC_S3*.bin"))
+        f = bins[0] if bins else None
+        if not f:
+            err("  No MicroPython image found. Download the ESP32-S3 build from")
+            err(f"  {MICROPYTHON_URL} and drop it into:")
+            err(f"    {d}")
+            return False
+        state["fw"] = f
+        ok(f"  MicroPython firmware ready: {f}")
+        return True
+
+    def flash():
+        _run_esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600", "erase_flash"], timeout=60)
+        _run_esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "460800",
+            "write_flash", "--flash_mode", "qio", "--flash_size", "detect",
+            "0x0", str(state["fw"]),
+        ], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash MicroPython"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       "Firmware : MicroPython for ESP32-S3 (erase + 0x0)",
+                       f"Port     : {port}"])
+
+
+def _run_marauder_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("lilygo_tdeck") / "marauder"
+
+    def prep():
+        binf = _download_release_asset(
+            MARAUDER_OWNER, MARAUDER_REPO,
+            [r"esp32_marauder.*s3.*\.bin",
+             r"esp32_marauder.*dev_board_pro.*\.bin",
+             r"esp32_marauder[^/]*\.bin"],
+            dest, "ESP32-S3 Marauder firmware")
+        if not binf:
+            err("  Could not fetch an ESP32-S3 Marauder firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MARAUDER_OWNER}/{MARAUDER_REPO}/releases")
+            return False
+        blf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"bootloader[^/]*\.bin"], dest, "bootloader")
+        ptf = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"partitions[^/]*\.bin"], dest, "partitions")
+        b0f = _download_release_asset(MARAUDER_OWNER, MARAUDER_REPO, [r"boot_app0[^/]*\.bin"], dest, "boot_app0")
+        if blf and ptf and b0f:
+            state["files"] = [("0x0", str(blf)), ("0x8000", str(ptf)),
+                              ("0xe000", str(b0f)), ("0x10000", str(binf))]
+            ok("  Full Marauder image set ready.")
+        else:
+            state["files"] = [("0x10000", str(binf))]
+            warn("  Only the Marauder firmware image was available; flashing app slot at 0x10000.")
+            warn("  A first-time/clean install may also require bootloader/partitions/boot_app0.")
+        return True
+
+    def flash():
+        args = ["--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+                "write_flash", "--flash_mode", "dio", "--flash_size", "detect"]
+        for off, p in state["files"]:
+            args += [off, p]
+        _run_esptool(args, timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32 Marauder"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       f"Firmware : ESP32 Marauder ({MARAUDER_OWNER}/{MARAUDER_REPO})",
+                       f"Port     : {port}"])
+
+
+def _run_meshtastic_payload(fw, port):
+    state = {}
+    dest = get_firmware_dir("lilygo_tdeck") / "meshtastic"
+
+    def prep():
+        binf = _download_release_asset(MESHTASTIC_OWNER, MESHTASTIC_REPO,
+                                       MESHTASTIC_VARIANT_PATTERNS, dest,
+                                       "Meshtastic firmware (t-deck)")
+        if not binf:
+            err("  Could not fetch the Meshtastic t-deck firmware .bin from the latest release.")
+            err(f"  Check https://github.com/{MESHTASTIC_OWNER}/{MESHTASTIC_REPO}/releases")
+            return False
+        state["fw"] = binf
+        ok(f"  Meshtastic firmware ready: {binf}")
+        return True
+
+    def flash():
+        # Meshtastic device-install for ESP32-S3: erase then write the factory image at 0x0.
+        _run_esptool(["--chip", ESP_CHIP, "--port", port, "--baud", "921600", "erase_flash"], timeout=60)
+        _run_esptool([
+            "--chip", ESP_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "--flash_mode", "dio", "--flash_size", "detect",
+            "0x0", str(state["fw"]),
+        ], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash Meshtastic"),
+        info_fn=lambda: op_device_info(port),
+        prepare_fn=prep, flash_fn=flash,
+        summary_lines=[f"Board    : {TOOL_NAME}",
+                       f"Firmware : Meshtastic t-deck ({MESHTASTIC_OWNER}/{MESHTASTIC_REPO}) → erase + 0x0",
+                       f"Port     : {port}"])
+
+
+def _dispatch_firmware_payload(fw, port):
+    name = fw.get("firmware", "")
+    if name == "Marauder":
+        _run_marauder_payload(fw, port)
+    elif name == "Meshtastic":
+        _run_meshtastic_payload(fw, port)
+    elif name == "Application":
+        _run_app_payload(fw, port)
+    elif name == "MicroPython":
+        _run_micropython_payload(fw, port)
+    else:
+        err(f"Unknown firmware payload '{name}' for {TOOL_NAME}.")
+
+
 def main():
     require_sudo()
     print_banner(TOOL_NAME, DESCRIPTION)
@@ -515,6 +706,12 @@ def main():
 
     ok(f"LilyGo T-Deck detected on {port}")
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Device Info (chip_id, hardware info)",

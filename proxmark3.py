@@ -55,6 +55,7 @@ from common import (
     require_sudo, sudo_run, sudo_output, run_streaming_sudo,
     ensure_apt_packages, ensure_brew_packages, get_os_flavor,
     check_latest_github_release, compare_versions, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
 )
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -584,6 +585,70 @@ def op_firmware_update(port: str):
         info("If the device is bricked, try entering bootloader mode manually and re-running.")
 
 
+# ── Firmware payloads (main-page) ─────────────────────────────────────────────
+
+# firmware key → (flash utility, default label). The Iceman firmware binaries are
+# bundled by the 'proxmark3' apt package, so no download is required.
+PM3_FLASH_PAYLOADS = {
+    "Iceman-All":       ("pm3-flash-all",       "Flash All (bootrom + fullimage)"),
+    "Iceman-Bootrom":   ("pm3-flash-bootrom",   "Flash Bootrom only"),
+    "Iceman-FullImage": ("pm3-flash-fullimage", "Flash Full Image only"),
+}
+
+
+def _prep_pm3_flash(flash_bin: str) -> bool:
+    """PREPARE step: ensure the pm3 flash utility (which bundles the Iceman
+    firmware binaries) is installed. Returns True only when it is on PATH."""
+    if get_os_flavor() == "linux" and not shutil.which(flash_bin):
+        info(f"  {flash_bin} not found — installing the proxmark3 apt package…")
+        ensure_apt_packages(["proxmark3"])
+    if not shutil.which(flash_bin):
+        err(f"  '{flash_bin}' not found in PATH — cannot flash.")
+        info("  On Kali Linux install with: sudo apt install proxmark3")
+        return False
+    ok(f"  Flasher ready: {flash_bin} (Iceman firmware bundled by the package)")
+    info("  Ensure the Proxmark3 is in bootloader mode (hold the button while")
+    info("  plugging in USB) — pm3-flash-* enters it automatically on most boards.")
+    return True
+
+
+def _flash_pm3(flash_bin: str, port: str):
+    """FLASH step: reuse the pm3-flash-* writer (identical to op_firmware_update)."""
+    cmd = [flash_bin]
+    if port:
+        cmd += [port]
+    info(f"Running: {' '.join(cmd)}")
+    info("  Do NOT disconnect USB during flashing.")
+    rc = run_streaming_sudo(cmd, on_line=lambda l: info(l), timeout=300)
+    if rc == 0:
+        ok("Firmware flash complete. Unplug and replug the Proxmark3.")
+        info("Verify firmware version after reconnecting: pm3 -c 'hw version'")
+    else:
+        err(f"Flash tool exited with code {rc}. Check output above.")
+
+
+def _dispatch_firmware_payload(fw: dict, port: str):
+    """Route a selected .qfw firmware payload to the right pm3-flash-* utility."""
+    name = fw.get("firmware", "")
+    if name not in PM3_FLASH_PAYLOADS:
+        err(f"Unknown Proxmark3 firmware payload: {name!r}")
+        info(f"  Supported: {', '.join(PM3_FLASH_PAYLOADS)}")
+        return
+    flash_bin, deflabel = PM3_FLASH_PAYLOADS[name]
+    run_firmware_payload(
+        fw.get("label", deflabel),
+        info_fn=lambda: op_hw_status(port),
+        prepare_fn=lambda: _prep_pm3_flash(flash_bin),
+        flash_fn=lambda: _flash_pm3(flash_bin, port),
+        summary_lines=[
+            f"Board    : {TOOL_NAME}",
+            f"Firmware : Iceman (RfidResearchGroup/proxmark3, apt-bundled)",
+            f"Flasher  : {flash_bin}",
+            f"Port     : {port or '(auto)'}",
+        ],
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -623,6 +688,12 @@ def main():
     ok(f"Proxmark3 found on {port}")
 
     check_firmware_version(port)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw, port)
+        return
 
     MENU_OPTIONS = [
         "Hardware Status",

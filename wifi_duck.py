@@ -67,6 +67,9 @@ from common import (
     ensure_apt_packages, ensure_brew_packages, get_os_flavor,
     get_selected_payload, verify_device_connection,
     check_latest_github_release, announce_firmware_update,
+    selected_firmware_payload, run_firmware_payload,
+    download_firmware, get_firmware_dir, get_github_release_asset_url,
+    run_streaming,
 )
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -400,6 +403,159 @@ def op_firmware_update_ota():
         info("  - Check if the device is still responding (ping 192.168.4.1)")
 
 
+# ── Firmware payloads (main-page "FIRMWARE - ..." auto-flash) ─────────────────
+# Adds the official WiFi Duck firmware (SpacehuhnTech/WiFiDuck) as no-menu
+# payloads. The ESP8266 half is flashed two ways:
+#   ESP8266 (esptool) — wired serial flash of the release .bin via esptool
+#   ESP8266 (OTA)      — reuses the module's existing HTTP /update OTA path
+# Source repo/releases: https://github.com/SpacehuhnTech/WiFiDuck
+# (ESP8266 firmware asset: dstike_wifi_duck_esp8266_*.bin)
+
+WIFIDUCK_OWNER = "SpacehuhnTech"
+WIFIDUCK_REPO  = "WiFiDuck"
+ESP_UART_VID_PIDS = [(0x10C4, 0xEA60), (0x1A86, 0x7523), (0x0403, 0x6001),
+                     (0x1A86, 0x55D4)]
+
+
+def _fw_dir() -> Path:
+    d = get_firmware_dir("wifi_duck")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _fetch_esp8266_bin():
+    url = get_github_release_asset_url(WIFIDUCK_OWNER, WIFIDUCK_REPO, "",
+                                       r"dstike_wifi_duck_esp8266.*\.bin")
+    if not url:
+        warn("  Could not resolve the WiFi Duck ESP8266 .bin from GitHub releases.")
+        existing = sorted(_fw_dir().glob("*esp8266*.bin"))
+        if existing:
+            ok(f"  Using operator-supplied image: {existing[-1].name}")
+            return existing[-1]
+        return None
+    dest = _fw_dir() / url.rsplit("/", 1)[-1]
+    if dest.exists() and dest.stat().st_size > 0:
+        ok(f"  ESP8266 firmware already downloaded: {dest.name}")
+        return dest
+    return dest if download_firmware(url, dest, "WiFi Duck ESP8266 firmware") else None
+
+
+def _fw_device_info():
+    heading("Device Info")
+    info(f"Board : {TOOL_NAME} (ESP8266 + ATmega32U4)")
+    info("ESP8266 half hosts the AP/WebSocket UI; this payload updates its firmware.")
+
+
+def _prep_esptool(staged) -> bool:
+    binf = _fetch_esp8266_bin()
+    if not binf:
+        err("  Could not obtain the ESP8266 firmware .bin — aborting before the flash.")
+        return False
+    info("  Ensuring esptool is available…")
+    ensure_pip_packages([("esptool", "esptool")])
+    port = find_serial_port_by_vidpid(ESP_UART_VID_PIDS)
+    if not port:
+        port = prompt("ESP8266 USB-serial port (e.g. /dev/ttyUSB0) — blank to abort")
+    if not port:
+        err("  No ESP8266 serial port available — aborting before the flash.")
+        info("  Connect the WiFi Duck's ESP8266 USB-UART and re-run the payload.")
+        return False
+    staged["bin"] = binf
+    staged["port"] = port
+    ok(f"  Ready: esptool + {Path(binf).name}  (port {port})")
+    return True
+
+
+def _prep_ota(staged) -> bool:
+    binf = _fetch_esp8266_bin()
+    if not binf:
+        err("  Could not obtain the ESP8266 firmware .bin — aborting before the flash.")
+        return False
+    try:
+        import requests as _req
+        r = _req.get(DUCK_HTTP, timeout=4)
+        reachable = r.status_code == 200
+    except Exception:
+        reachable = False
+    if not reachable:
+        err(f"  WiFi Duck HTTP endpoint {DUCK_HTTP} not reachable — aborting before the flash.")
+        info("  Connect to the 'wifiduck' AP first (OTA uploads over HTTP).")
+        return False
+    staged["bin"] = binf
+    ok(f"  Ready: OTA upload of {Path(binf).name} to {DUCK_HTTP}/update")
+    return True
+
+
+def _flash_esptool(staged):
+    port = staged["port"]
+    binf = staged["bin"]
+    cmd = [sys.executable, "-m", "esptool", "--chip", "esp8266",
+           "--port", port, "--baud", "460800", "write_flash", "0x0", str(binf)]
+    info(f"Running: {' '.join(cmd)}")
+    rc = run_streaming(cmd, on_line=lambda l: info(f"  esptool: {l}"), timeout=300)
+    if rc == 0:
+        ok("  ESP8266 flashed — reconnect to the 'wifiduck' AP after it reboots.")
+    else:
+        warn(f"  esptool exited with code {rc}. If it stalled, hold the ESP FLASH button")
+        warn("  during connect, or retry at --baud 115200.")
+
+
+def _flash_ota(staged):
+    binf = staged["bin"]
+    try:
+        import requests
+    except ImportError:
+        err("  'requests' not available — cannot OTA. Install: pip install requests")
+        return
+    info(f"  Uploading {Path(binf).name} to {DUCK_HTTP}/update … (~30-60s, stay on the AP)")
+    try:
+        with open(binf, "rb") as fh:
+            resp = requests.post(
+                f"{DUCK_HTTP}/update",
+                files={"firmware": (Path(binf).name, fh, "application/octet-stream")},
+                timeout=120,
+            )
+        if resp.status_code == 200:
+            ok("  Firmware uploaded — the ESP8266 will reboot. Reconnect to the AP.")
+        else:
+            warn(f"  Unexpected HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as e:
+        err(f"  OTA upload failed: {e}")
+
+
+def _dispatch_firmware_payload(fw: dict):
+    fw_name = fw.get("firmware", "")
+    label = fw.get("label", f"Flash {fw_name}")
+    staged: dict = {}
+    if fw_name == "WiFi Duck ESP8266 (esptool)":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_esptool(staged),
+            flash_fn=lambda: _flash_esptool(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} — ESP8266 half",
+                "Firmware : WiFi Duck (SpacehuhnTech/WiFiDuck) esp8266 .bin",
+                "Flasher  : esptool write_flash 0x0 (wired USB-UART)",
+            ],
+        )
+    elif fw_name == "WiFi Duck ESP8266 (OTA)":
+        run_firmware_payload(
+            label,
+            info_fn=_fw_device_info,
+            prepare_fn=lambda: _prep_ota(staged),
+            flash_fn=lambda: _flash_ota(staged),
+            summary_lines=[
+                f"Board    : {TOOL_NAME} — ESP8266 half",
+                "Firmware : WiFi Duck (SpacehuhnTech/WiFiDuck) esp8266 .bin",
+                f"Flasher  : HTTP OTA POST to {DUCK_HTTP}/update",
+            ],
+        )
+    else:
+        err(f"Unknown firmware payload: {fw_name!r}")
+        info("  Supported: WiFi Duck ESP8266 (esptool), WiFi Duck ESP8266 (OTA)")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -421,6 +577,14 @@ def main():
         ])
 
     print_banner(TOOL_NAME, DESCRIPTION)
+
+    # Firmware payload selected on the main page → auto-flash (no menu).
+    # Handled before detection: esptool flashing uses a wired UART (not the AP),
+    # and the OTA prepare step verifies HTTP reachability itself.
+    fw = selected_firmware_payload()
+    if fw:
+        _dispatch_firmware_payload(fw)
+        return
 
     info("Detecting WiFi Duck…")
     info("Primary: HTTP request to http://192.168.4.1")
