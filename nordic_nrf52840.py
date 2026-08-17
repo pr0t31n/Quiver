@@ -1211,6 +1211,41 @@ def _stream_shell(cmd: str, label: str, timeout: int):
 _NRFUTIL_MAC_VER = "1.4.0-5515776"
 
 
+def _download_binary_no_browser_ua(url: str, dest) -> bool:
+    """Download `url` to `dest` with a NON-browser User-Agent, and verify the result is a real
+    binary (not an HTML page). Nordic's artifactory does REVERSE UA-sniffing: it serves the
+    actual binary to tools (curl / python-requests) but a 25 KB '<!DOCTYPE html>' landing page
+    to browser UAs (Mozilla/…). Quiver's shared download_firmware() sends a browser UA, so it
+    silently saved that HTML page as the 'binary' (→ 'syntax error near unexpected token' when
+    exec'd). Using a curl-style UA here gets the real file; the HTML/size guard makes a wrong
+    endpoint fail loudly instead of writing junk."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    headers = {"User-Agent": "curl/8.4.0", "Accept": "application/octet-stream"}
+    data = b""
+    try:
+        import requests
+        r = requests.get(url, headers=headers, allow_redirects=True, timeout=180)
+        if r.status_code != 200:
+            err(f"  nrfutil download HTTP {r.status_code}")
+            return False
+        data = r.content
+    except ImportError:
+        import urllib.request
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=180) as resp:  # noqa: S310 — pinned Nordic URL
+            data = resp.read()
+    head = data[:512].lstrip().lower()
+    if head.startswith(b"<!doctype") or head.startswith(b"<html") or b"<html" in head:
+        err("  nrfutil download returned an HTML page, not the binary (wrong endpoint/UA).")
+        return False
+    if len(data) < 500_000:
+        err(f"  nrfutil download too small ({len(data)} bytes) — not the nrfutil binary.")
+        return False
+    dest.write_bytes(data)
+    return True
+
+
 def _ensure_new_nrfutil():
     """Provision Nordic's nRF Util (a self-contained binary — no Python, no native deps) and
     install its DFU command set (nrf5sdk-tools, which adds `nrfutil dfu`). Returns
@@ -1248,13 +1283,13 @@ def _ensure_new_nrfutil():
         _BUTTERFLY_VENV["nrfutil_home"] = home       # so _cleanup_flash_venv deletes it too
         nbin = str(Path(home) / "nrfutil")
         info("  Downloading Nordic nrfutil (correct build for this machine)…")
+        info(f"    {url}")
         try:
-            from common import download_firmware
-            if not download_firmware(url, Path(nbin), "Nordic nrfutil"):
-                err("  nrfutil download failed (check network / the Nordic artifactory URL).")
-                return "", ""
+            got = _download_binary_no_browser_ua(url, Path(nbin))
         except Exception as e:  # noqa: BLE001 — network best-effort
             err(f"  nrfutil download error: {e}")
+            return "", ""
+        if not got:
             return "", ""
         run(f"chmod +x '{nbin}'")
     home_env = f"NRFUTIL_HOME='{home}' " if home else ""
