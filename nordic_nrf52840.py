@@ -1046,12 +1046,105 @@ def _butterfly_hex_for_dk():
     return None
 
 
+def _find_isolated_bin(name: str) -> str:
+    """Locate a CLI that may live in a pipx / user bin dir not on the current PATH."""
+    p = run_output(f"which {name} 2>/dev/null || true").strip()
+    if p:
+        return p
+    for cand in (Path.home() / ".local" / "bin" / name,
+                 Path("/opt/homebrew/bin") / name, Path("/usr/local/bin") / name):
+        if cand.exists():
+            return str(cand)
+    return ""
+
+
+# Ephemeral flashing venv: created on demand, installs the DFU flasher + deps in complete
+# isolation from Quiver's interpreter, and is DELETED after the flash so nothing is left on
+# the system. State is carried from PREPARE → FLASH via this module global.
+_BUTTERFLY_VENV = {"dir": None, "winstall": None, "nrfutil": None}
+
+
+def _cleanup_flash_venv():
+    """Remove the throwaway flashing venv and reset the carried state (idempotent)."""
+    d = _BUTTERFLY_VENV.get("dir")
+    if d and Path(d).exists():
+        run(f"rm -rf {d} 2>/dev/null || true")
+    _BUTTERFLY_VENV.update({"dir": None, "winstall": None, "nrfutil": None})
+
+
+def _make_flash_venv(pkgs: list) -> bool:
+    """Create a THROWAWAY venv, install `pkgs` (+deps) into it, and resolve the flasher
+    binaries. Fully isolated from the Quiver/Flask interpreter — nothing it installs can
+    downgrade shared packages. Registered for deletion at process exit so an aborted run
+    never leaves it behind. Returns True if winstall or nrfutil is available in the venv."""
+    import tempfile, atexit
+    _cleanup_flash_venv()
+    venv = tempfile.mkdtemp(prefix="quiver_bfly_flash_")
+    _BUTTERFLY_VENV["dir"] = venv
+    atexit.register(_cleanup_flash_venv)
+    info(f"  Building a throwaway, self-deleting flashing venv: {venv}")
+    if run(f"{sys.executable} -m venv {venv}").returncode != 0:
+        err("  Could not create the flashing venv (python -m venv failed).")
+        return False
+    pip = f"{venv}/bin/pip"
+    run(f"{pip} install --upgrade pip 2>/dev/null || true")
+    pkgstr = " ".join(f"'{p}'" for p in pkgs)          # quote so 'nrfutil<7' isn't a shell redirect
+    info(f"  Installing into the venv (isolated): {', '.join(pkgs)} …")
+    if run(f"{pip} install {pkgstr}").returncode != 0:
+        warn("  venv package install returned non-zero — see output above.")
+    for tool in ("winstall", "nrfutil"):
+        cand = f"{venv}/bin/{tool}"
+        if Path(cand).exists():
+            _BUTTERFLY_VENV[tool] = cand
+    return bool(_BUTTERFLY_VENV["winstall"] or _BUTTERFLY_VENV["nrfutil"])
+
+
 def _prep_butterfly_flash(port: str) -> bool:
-    """Firmware-payload PREPARE for ButteRFly (WHAD BLE MITM, Rx/Tx): obtain
-    butterfly.hex and a J-Link backend so only the write remains."""
+    """Firmware-payload PREPARE for ButteRFly (WHAD BLE MITM, Rx/Tx). Routes by VARIANT:
+      Dongle (PCA10059) → USB DFU (no J-Link): WHAD's winstall packages+flashes it, else
+                          nrfutil DFU with a package generated from butterfly.hex.
+      DK (PCA10056)     → J-Link/SWD flash of butterfly.hex (needs the J-Link probe).
+    Requiring a J-Link probe for the DONGLE was the bug that aborted dongle flashing."""
+    variant = _identify_variant()
+
+    # ── DONGLE — DFU path, NO J-Link ─────────────────────────────────────────
+    if variant in ("dongle_dfu", "dongle_app"):
+        if variant == "dongle_app":
+            warn("  Dongle is in APPLICATION mode — press the side button to enter DFU")
+            warn("  (LED pulses red, re-enumerates as 1915:521F) so ButteRFly can be written.")
+            pause("  Press ENTER once the dongle LED is blinking (DFU mode active).")
+        # AUTO-PROVISION the DFU flasher with ZERO persistent footprint: use a flasher that
+        # is already on the system if present; otherwise build a THROWAWAY venv, install WHAD
+        # into it, and delete the venv after flashing (see _flash_butterfly_dongle). winstall
+        # also downloads the ButteRFly firmware, so this covers auto-install AND auto-download.
+        sys_winstall = _find_isolated_bin("winstall")
+        sys_nrfutil  = _find_isolated_bin("nrfutil")
+        if sys_winstall or sys_nrfutil:
+            _BUTTERFLY_VENV.update({"dir": None, "winstall": sys_winstall or None,
+                                    "nrfutil": sys_nrfutil or None})
+            ok("  DFU flasher already present on the system — no install needed.")
+            return True
+        info("  No DFU flasher present — provisioning one in a throwaway venv (auto-deleted)…")
+        if _make_flash_venv(["whad"]) and _BUTTERFLY_VENV["winstall"]:
+            ok(f"  WHAD provisioned in throwaway venv: {_BUTTERFLY_VENV['winstall']}")
+            return True
+        # Fallback: classic nrfutil in the throwaway venv + the auto-downloaded butterfly.hex.
+        if _make_flash_venv(["nrfutil<7"]) and _BUTTERFLY_VENV["nrfutil"]:
+            hexf = _butterfly_hex_for_dk()
+            if hexf and Path(hexf).exists():
+                ok(f"  nrfutil provisioned in throwaway venv: {_BUTTERFLY_VENV['nrfutil']}")
+                return True
+        err("  Could not provision a DFU flasher even in a throwaway venv.")
+        info("  Check network access — the venv is isolated and won't affect Quiver/Flask.")
+        _cleanup_flash_venv()
+        return False
+
+    # ── DK — J-Link/SWD path ─────────────────────────────────────────────────
     ready = True
     if not (find_serial_port_by_vidpid(VID_PID_DK_JLINK) or _jlink_emus()):
-        err("  nRF52840-DK J-Link not detected on USB (connect the J-LINK port).")
+        err("  No nRF52840 detected as a dongle (DFU) or a DK (J-Link).")
+        info("  Dongle: press the side button for DFU mode (1915:521F).")
+        info("  DK: connect the J-LINK port with a DATA cable, SW8 -> ON.")
         ready = False
     hexf = _butterfly_hex_for_dk()
     if hexf and Path(hexf).exists():
@@ -1069,8 +1162,62 @@ def _prep_butterfly_flash(port: str) -> bool:
     return ready
 
 
+def _flash_butterfly_dongle() -> bool:
+    """DFU-flash ButteRFly to the dongle using the flasher provisioned in PREPARE (a system
+    tool, or one installed in a throwaway venv). The throwaway venv + any generated DFU
+    package are DELETED afterwards, so nothing is left installed on the system."""
+    winstall = _BUTTERFLY_VENV.get("winstall")
+    nrfutil  = _BUTTERFLY_VENV.get("nrfutil")
+    success = False
+    gen_pkg = None
+    try:
+        if winstall:
+            info(f"Running: {winstall} --flash butterfly")
+            r = run(f"{winstall} --flash butterfly")
+            success = (r.returncode == 0)
+            if not success:
+                warn("winstall flash returned non-zero — ensure the dongle is in DFU mode "
+                     "(side button — LED pulses red).")
+        elif nrfutil:
+            hexf = _butterfly_hex_for_dk()
+            dfu_port = find_serial_port_by_vidpid(VID_PID_DONGLE_DFU)
+            if hexf and dfu_port:
+                gen_pkg = Path(hexf).with_name("butterfly_dfu.zip")
+                info(f"Generating DFU package: {nrfutil} pkg generate → {gen_pkg.name}")
+                gen = run(f"{nrfutil} pkg generate --hw-version 52 --sd-req 0x00 "
+                          f"--application {hexf} --application-version 1 {gen_pkg}")
+                if gen.returncode == 0 and gen_pkg.exists():
+                    info(f"Running: {nrfutil} dfu usb-serial -pkg {gen_pkg} -p {dfu_port} -b 115200")
+                    r = run(f"{nrfutil} dfu usb-serial -pkg {gen_pkg} -p {dfu_port} -b 115200")
+                    success = (r.returncode == 0)
+                else:
+                    err("DFU package generation failed. If ButteRFly needs a SoftDevice, use the "
+                        "official whad-team/butterfly DFU zip via 'Flash Dongle (nrfutil DFU)'.")
+            else:
+                err("butterfly.hex / DFU port unavailable — cannot DFU-flash the dongle.")
+        else:
+            err("No DFU flasher was provisioned in prepare — cannot flash.")
+    finally:
+        # Tear down the throwaway venv + generated package now that flashing is done.
+        if gen_pkg is not None:
+            run(f"rm -f {gen_pkg} 2>/dev/null || true")
+        if _BUTTERFLY_VENV.get("dir"):
+            info("  Deleting the throwaway flashing venv…")
+            _cleanup_flash_venv()
+            ok("  Throwaway venv removed — nothing was left installed on the system.")
+    return success
+
+
 def _autoflash_butterfly(port: str):
-    """Firmware-payload FLASH: everything is prepped — write butterfly.hex."""
+    """Firmware-payload FLASH: everything is prepped — write ButteRFly by the right path."""
+    variant = _identify_variant()
+    if variant in ("dongle_dfu", "dongle_app"):
+        if _flash_butterfly_dongle():
+            ok("ButteRFly flashed to the dongle via DFU — it is now a WHAD BLE Rx/Tx radio.")
+            info("Drive it with the WHAD host tools (wsniff/wble-*); see the 'BLE MITM' op.")
+        else:
+            err("Dongle DFU flash failed — see the messages above.")
+        return
     hexf = _butterfly_hex_for_dk()
     if not hexf or not Path(hexf).exists():
         err("butterfly.hex missing at flash time — aborting.")
