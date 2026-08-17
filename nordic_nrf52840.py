@@ -1061,15 +1061,16 @@ def _find_isolated_bin(name: str) -> str:
 # Ephemeral flashing venv: created on demand, installs the DFU flasher + deps in complete
 # isolation from Quiver's interpreter, and is DELETED after the flash so nothing is left on
 # the system. State is carried from PREPARE → FLASH via this module global.
-_BUTTERFLY_VENV = {"dir": None, "winstall": None, "nrfutil": None}
+_BUTTERFLY_VENV = {"dir": None, "winstall": None, "nrfutil": None, "nrfutil_home": None}
 
 
 def _cleanup_flash_venv():
-    """Remove the throwaway flashing venv and reset the carried state (idempotent)."""
-    d = _BUTTERFLY_VENV.get("dir")
-    if d and Path(d).exists():
-        run(f"rm -rf {d} 2>/dev/null || true")
-    _BUTTERFLY_VENV.update({"dir": None, "winstall": None, "nrfutil": None})
+    """Remove the throwaway flashing venv + the ephemeral nrfutil home, and reset state."""
+    for key in ("dir", "nrfutil_home"):
+        d = _BUTTERFLY_VENV.get(key)
+        if d and Path(d).exists():
+            run(f"rm -rf {d} 2>/dev/null || true")
+    _BUTTERFLY_VENV.update({"dir": None, "winstall": None, "nrfutil": None, "nrfutil_home": None})
 
 
 def _make_flash_venv(pkgs: list) -> bool:
@@ -1128,14 +1129,15 @@ def _prep_butterfly_flash(port: str) -> bool:
         if _make_flash_venv(["whad"]) and _BUTTERFLY_VENV["winstall"]:
             ok(f"  WHAD provisioned in throwaway venv: {_BUTTERFLY_VENV['winstall']}")
             return True
-        # Fallback: classic nrfutil in the throwaway venv + the auto-downloaded butterfly.hex.
-        if _make_flash_venv(["nrfutil<7"]) and _BUTTERFLY_VENV["nrfutil"]:
-            hexf = _butterfly_hex_for_dk()
-            if hexf and Path(hexf).exists():
-                ok(f"  nrfutil provisioned in throwaway venv: {_BUTTERFLY_VENV['nrfutil']}")
-                return True
-        err("  Could not provision a DFU flasher even in a throwaway venv.")
-        info("  Check network access — the venv is isolated and won't affect Quiver/Flask.")
+        # winstall unavailable: at FLASH time we download Nordic's correct-arch nrfutil BINARY
+        # and DFU-flash a package built from the auto-downloaded butterfly.hex. Confirm the
+        # non-network pieces are in place now; the binary itself is fetched at write time.
+        hexf = _butterfly_hex_for_dk()
+        if hexf and Path(hexf).exists() and find_serial_port_by_vidpid(VID_PID_DONGLE_DFU):
+            ok("  WHAD winstall unavailable — will DFU-flash with Nordic's nrfutil at write time.")
+            return True
+        err("  Could not provision a DFU flasher (winstall failed; butterfly.hex or DFU port missing).")
+        info("  Check network access — provisioning is isolated and won't affect Quiver/Flask.")
         _cleanup_flash_venv()
         return False
 
@@ -1182,6 +1184,42 @@ def _stream_shell(cmd: str, label: str, timeout: int):
     return rc, seen["err"]
 
 
+def _ensure_new_nrfutil():
+    """Provision Nordic's NEW nrfutil — a self-contained binary (no Python, no native deps) —
+    for THIS machine's exact architecture, install its DFU command set into an EPHEMERAL home,
+    and return (nrfutil_path, nrfutil_home) or ('', ''). This is the same tool winstall uses,
+    but with the CORRECT-arch download: winstall grabs the wrong build on Apple Silicon (→
+    'Exec format error'), and pip's classic nrfutil is a dead end on modern Python (native deps
+    won't build, and the old build pip falls back to uses Py2 'dict.iteritems'). A matched
+    binary sidesteps both. The home is ephemeral so the whole install self-deletes afterwards."""
+    import tempfile
+    machine = (run_output("uname -m 2>/dev/null || true") or "").strip().lower()
+    system  = (run_output("uname -s 2>/dev/null || true") or "").strip().lower()
+    arch = "aarch64" if machine in ("arm64", "aarch64") else "x86_64"
+    target = f"{arch}-apple-darwin" if "darwin" in system else f"{arch}-unknown-linux-gnu"
+    url = ("https://files.nordicsemi.com/artifactory/swtools/external/nrfutil/"
+           f"executables/{target}/nrfutil")
+    home = tempfile.mkdtemp(prefix="quiver_nrfutil_home_")
+    _BUTTERFLY_VENV["nrfutil_home"] = home           # so _cleanup_flash_venv deletes it too
+    binp = str(Path(home) / "nrfutil")
+    info(f"  Downloading Nordic nrfutil for {target} (the correct binary for this machine)…")
+    try:
+        from common import download_firmware
+        if not download_firmware(url, Path(binp), "Nordic nrfutil"):
+            err("  nrfutil download failed (check network / the Nordic artifactory URL).")
+            return "", ""
+    except Exception as e:  # noqa: BLE001 — network best-effort
+        err(f"  nrfutil download error: {e}")
+        return "", ""
+    run(f"chmod +x '{binp}'")
+    info("  Installing the nrfutil DFU command set (nrf5sdk-tools) into an ephemeral home…")
+    rc, e = _stream_shell(f"NRFUTIL_HOME='{home}' '{binp}' install nrf5sdk-tools --force",
+                          "nrfutil", 300)
+    if rc != 0 or e:
+        warn("  'nrfutil install nrf5sdk-tools' reported issues — the flash may still work.")
+    return binp, home
+
+
 def _flash_butterfly_dongle() -> bool:
     """DFU-flash ButteRFly to the dongle using the provisioned flasher, with STREAMED output
     and a TIMEOUT so it can never hang silently. Tries WHAD's winstall first (streamed; its
@@ -1204,40 +1242,41 @@ def _flash_butterfly_dongle() -> bool:
                 info("  Falling back to the classic pip-nrfutil DFU path (pure Python)…")
 
         if not success:
-            # nrfutil DFU — the deterministic fallback. Provision it in its own throwaway venv
-            # (nrfutil's old 'click' pin stays isolated) if it wasn't already installed.
-            nrfutil = _BUTTERFLY_VENV.get("nrfutil")
-            if not nrfutil:
-                if _make_flash_venv(["nrfutil<7"]):
-                    nrfutil = _BUTTERFLY_VENV.get("nrfutil")
+            # Deterministic fallback: Nordic's NEW nrfutil BINARY (correct arch, no Python) —
+            # generate a DFU package from the auto-downloaded butterfly.hex and write it over
+            # USB-serial DFU. This avoids BOTH winstall's wrong-arch nrfutil download and pip
+            # nrfutil's Py2/native-dep breakage. The nrfutil home is ephemeral (removed below).
+            nbin, nhome = _ensure_new_nrfutil()
             hexf = _butterfly_hex_for_dk()
             dfu_port = find_serial_port_by_vidpid(VID_PID_DONGLE_DFU)
-            if nrfutil and hexf and dfu_port:
+            if nbin and hexf and dfu_port:
                 gen_pkg = Path(hexf).with_name("butterfly_dfu.zip")
                 info(f"Generating DFU package (streamed): {gen_pkg.name}")
                 g, gerr = _stream_shell(
-                    f"'{nrfutil}' pkg generate --hw-version 52 --sd-req 0x00 "
-                    f"--application '{hexf}' --application-version 1 '{gen_pkg}'",
+                    f"NRFUTIL_HOME='{nhome}' '{nbin}' pkg generate --hw-version 52 "
+                    f"--sd-req 0x00 --application '{hexf}' --application-version 1 '{gen_pkg}'",
                     "nrfutil", 120)
                 if g == 0 and not gerr and gen_pkg.exists():
                     info(f"Flashing (streamed): nrfutil dfu usb-serial -pkg {gen_pkg.name} "
                          f"-p {dfu_port} -b 115200")
                     rc, derr = _stream_shell(
-                        f"'{nrfutil}' dfu usb-serial -pkg '{gen_pkg}' -p '{dfu_port}' -b 115200",
-                        "nrfutil", 300)
+                        f"NRFUTIL_HOME='{nhome}' '{nbin}' dfu usb-serial -pkg '{gen_pkg}' "
+                        f"-p '{dfu_port}' -b 115200", "nrfutil", 300)
                     success = (rc == 0 and not derr)
                 else:
                     err("  DFU package generation failed. If ButteRFly needs a SoftDevice, grab the "
                         "official whad-team/butterfly DFU zip and use 'Flash Dongle (nrfutil DFU)'.")
-            elif not winstall:
-                err("  No working DFU flasher (no winstall, and nrfutil/firmware/DFU-port missing).")
+            elif not nbin:
+                err("  Could not provision a working nrfutil binary for this platform.")
+            else:
+                err("  DFU flash prerequisites missing (butterfly.hex or the DFU serial port).")
     finally:
         if gen_pkg is not None:
             run(f"rm -f {gen_pkg} 2>/dev/null || true")
-        if _BUTTERFLY_VENV.get("dir"):
-            info("  Deleting the throwaway flashing venv…")
+        if _BUTTERFLY_VENV.get("dir") or _BUTTERFLY_VENV.get("nrfutil_home"):
+            info("  Deleting the throwaway flashing venv / ephemeral nrfutil home…")
             _cleanup_flash_venv()
-            ok("  Throwaway venv removed — nothing was left installed on the system.")
+            ok("  Throwaway artifacts removed — nothing was left installed on the system.")
     return success
 
 
