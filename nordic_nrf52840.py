@@ -1163,42 +1163,55 @@ def _prep_butterfly_flash(port: str) -> bool:
 
 
 def _flash_butterfly_dongle() -> bool:
-    """DFU-flash ButteRFly to the dongle using the flasher provisioned in PREPARE (a system
-    tool, or one installed in a throwaway venv). The throwaway venv + any generated DFU
-    package are DELETED afterwards, so nothing is left installed on the system."""
-    winstall = _BUTTERFLY_VENV.get("winstall")
-    nrfutil  = _BUTTERFLY_VENV.get("nrfutil")
+    """DFU-flash ButteRFly to the dongle using the provisioned flasher, with STREAMED output
+    and a TIMEOUT so it can never hang silently. Tries WHAD's winstall first (streamed; its
+    first run also downloads the firmware — the dongle LED changes only once the DFU write
+    begins); on failure it falls back to nrfutil DFU. The throwaway venv(s) + any generated
+    package are deleted afterwards, so nothing is left installed on the system."""
     success = False
     gen_pkg = None
     try:
+        winstall = _BUTTERFLY_VENV.get("winstall")
         if winstall:
-            info(f"Running: {winstall} --flash butterfly")
-            r = run(f"{winstall} --flash butterfly")
-            success = (r.returncode == 0)
+            info(f"Running (streamed): {winstall} --flash butterfly")
+            info("  First run downloads the ButteRFly firmware — the lines below show progress.")
+            info("  The dongle LED only changes once the DFU WRITE starts (after any download).")
+            rc = run_streaming([winstall, "--flash", "butterfly"],
+                               on_line=lambda l: info(f"  winstall: {l}"), timeout=600)
+            success = (rc == 0)
             if not success:
-                warn("winstall flash returned non-zero — ensure the dongle is in DFU mode "
-                     "(side button — LED pulses red).")
-        elif nrfutil:
+                warn("  winstall did not complete cleanly (see the streamed output above).")
+                info("  Falling back to the nrfutil DFU path…")
+
+        if not success:
+            # nrfutil DFU — the deterministic fallback. Provision it in its own throwaway venv
+            # (nrfutil's old 'click' pin stays isolated) if it wasn't already installed.
+            nrfutil = _BUTTERFLY_VENV.get("nrfutil")
+            if not nrfutil:
+                if _make_flash_venv(["nrfutil<7"]):
+                    nrfutil = _BUTTERFLY_VENV.get("nrfutil")
             hexf = _butterfly_hex_for_dk()
             dfu_port = find_serial_port_by_vidpid(VID_PID_DONGLE_DFU)
-            if hexf and dfu_port:
+            if nrfutil and hexf and dfu_port:
                 gen_pkg = Path(hexf).with_name("butterfly_dfu.zip")
-                info(f"Generating DFU package: {nrfutil} pkg generate → {gen_pkg.name}")
-                gen = run(f"{nrfutil} pkg generate --hw-version 52 --sd-req 0x00 "
-                          f"--application {hexf} --application-version 1 {gen_pkg}")
-                if gen.returncode == 0 and gen_pkg.exists():
-                    info(f"Running: {nrfutil} dfu usb-serial -pkg {gen_pkg} -p {dfu_port} -b 115200")
-                    r = run(f"{nrfutil} dfu usb-serial -pkg {gen_pkg} -p {dfu_port} -b 115200")
-                    success = (r.returncode == 0)
+                info(f"Generating DFU package (streamed): {gen_pkg.name}")
+                g = run_streaming([nrfutil, "pkg", "generate", "--hw-version", "52",
+                                   "--sd-req", "0x00", "--application", str(hexf),
+                                   "--application-version", "1", str(gen_pkg)],
+                                  on_line=lambda l: info(f"  nrfutil: {l}"), timeout=120)
+                if g == 0 and gen_pkg.exists():
+                    info(f"Flashing (streamed): nrfutil dfu usb-serial -pkg {gen_pkg.name} "
+                         f"-p {dfu_port} -b 115200")
+                    rc = run_streaming([nrfutil, "dfu", "usb-serial", "-pkg", str(gen_pkg),
+                                        "-p", dfu_port, "-b", "115200"],
+                                       on_line=lambda l: info(f"  nrfutil: {l}"), timeout=300)
+                    success = (rc == 0)
                 else:
-                    err("DFU package generation failed. If ButteRFly needs a SoftDevice, use the "
-                        "official whad-team/butterfly DFU zip via 'Flash Dongle (nrfutil DFU)'.")
-            else:
-                err("butterfly.hex / DFU port unavailable — cannot DFU-flash the dongle.")
-        else:
-            err("No DFU flasher was provisioned in prepare — cannot flash.")
+                    err("  DFU package generation failed. If ButteRFly needs a SoftDevice, grab the "
+                        "official whad-team/butterfly DFU zip and use 'Flash Dongle (nrfutil DFU)'.")
+            elif not winstall:
+                err("  No working DFU flasher (no winstall, and nrfutil/firmware/DFU-port missing).")
     finally:
-        # Tear down the throwaway venv + generated package now that flashing is done.
         if gen_pkg is not None:
             run(f"rm -f {gen_pkg} 2>/dev/null || true")
         if _BUTTERFLY_VENV.get("dir"):
