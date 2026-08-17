@@ -1162,6 +1162,26 @@ def _prep_butterfly_flash(port: str) -> bool:
     return ready
 
 
+def _stream_shell(cmd: str, label: str, timeout: int):
+    """Run a shell command with stdout+stderr MERGED and stdin from /dev/null, streaming every
+    line. Returns (exit_code, saw_error). Merging stderr is essential (WHAD/nrfutil write
+    there); /dev/null on stdin stops a prompting tool from hanging; and because some tools
+    (winstall) print a failure yet STILL exit 0, we also scan the output for hard error
+    markers so the caller can't be fooled into reporting success."""
+    seen = {"err": False}
+
+    def _line(l):
+        info(f"  {label}: {l}")
+        low = l.lower()
+        if ("an error occurred" in low or "exec format error" in low
+                or "traceback (most recent call last)" in low
+                or "command not found" in low or "no such file or directory" in low):
+            seen["err"] = True
+
+    rc = run_streaming(["bash", "-c", f"{cmd} </dev/null 2>&1"], on_line=_line, timeout=timeout)
+    return rc, seen["err"]
+
+
 def _flash_butterfly_dongle() -> bool:
     """DFU-flash ButteRFly to the dongle using the provisioned flasher, with STREAMED output
     and a TIMEOUT so it can never hang silently. Tries WHAD's winstall first (streamed; its
@@ -1176,12 +1196,12 @@ def _flash_butterfly_dongle() -> bool:
             info(f"Running (streamed): {winstall} --flash butterfly")
             info("  First run downloads the ButteRFly firmware — the lines below show progress.")
             info("  The dongle LED only changes once the DFU WRITE starts (after any download).")
-            rc = run_streaming([winstall, "--flash", "butterfly"],
-                               on_line=lambda l: info(f"  winstall: {l}"), timeout=600)
-            success = (rc == 0)
+            rc, werr = _stream_shell(f"'{winstall}' --flash butterfly", "winstall", 600)
+            success = (rc == 0 and not werr)      # winstall prints errors yet exits 0 — trust output
             if not success:
-                warn("  winstall did not complete cleanly (see the streamed output above).")
-                info("  Falling back to the nrfutil DFU path…")
+                warn("  winstall failed (it downloads a Nordic nrfutil binary that won't run on "
+                     "this platform — 'Exec format error'). Ignoring its exit code.")
+                info("  Falling back to the classic pip-nrfutil DFU path (pure Python)…")
 
         if not success:
             # nrfutil DFU — the deterministic fallback. Provision it in its own throwaway venv
@@ -1195,17 +1215,17 @@ def _flash_butterfly_dongle() -> bool:
             if nrfutil and hexf and dfu_port:
                 gen_pkg = Path(hexf).with_name("butterfly_dfu.zip")
                 info(f"Generating DFU package (streamed): {gen_pkg.name}")
-                g = run_streaming([nrfutil, "pkg", "generate", "--hw-version", "52",
-                                   "--sd-req", "0x00", "--application", str(hexf),
-                                   "--application-version", "1", str(gen_pkg)],
-                                  on_line=lambda l: info(f"  nrfutil: {l}"), timeout=120)
-                if g == 0 and gen_pkg.exists():
+                g, gerr = _stream_shell(
+                    f"'{nrfutil}' pkg generate --hw-version 52 --sd-req 0x00 "
+                    f"--application '{hexf}' --application-version 1 '{gen_pkg}'",
+                    "nrfutil", 120)
+                if g == 0 and not gerr and gen_pkg.exists():
                     info(f"Flashing (streamed): nrfutil dfu usb-serial -pkg {gen_pkg.name} "
                          f"-p {dfu_port} -b 115200")
-                    rc = run_streaming([nrfutil, "dfu", "usb-serial", "-pkg", str(gen_pkg),
-                                        "-p", dfu_port, "-b", "115200"],
-                                       on_line=lambda l: info(f"  nrfutil: {l}"), timeout=300)
-                    success = (rc == 0)
+                    rc, derr = _stream_shell(
+                        f"'{nrfutil}' dfu usb-serial -pkg '{gen_pkg}' -p '{dfu_port}' -b 115200",
+                        "nrfutil", 300)
+                    success = (rc == 0 and not derr)
                 else:
                     err("  DFU package generation failed. If ButteRFly needs a SoftDevice, grab the "
                         "official whad-team/butterfly DFU zip and use 'Flash Dongle (nrfutil DFU)'.")
