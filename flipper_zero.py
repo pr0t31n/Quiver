@@ -616,10 +616,259 @@ def _dispatch_firmware_payload(fw: dict, flipper, port: str):
     )
 
 
+# ── Wi-Fi Dev Board (ESP32-S2 add-on) firmware payloads ───────────────────────
+# The Flipper Zero Wi-Fi Dev Board is a separate ESP32-S2 module that clips onto
+# the Flipper's GPIO header and is flashed *directly* over its own USB-C port with
+# esptool — NOT through the Flipper's RPC/SD update flow. So dev-board payloads are
+# intercepted early in main(), before Flipper CDC detection/PyFlipper, and routed
+# here. Mirrors esp32d.py's esptool flow (python -m esptool, streaming output).
+
+# ESP32-S2 native USB (download/app) + common USB-serial bridges some dev boards use.
+DEVBOARD_VID_PIDS = [
+    (0x303A, 0x0002),   # Espressif ESP32-S2 native USB (ROM download mode)
+    (0x303A, 0x4001),   # Espressif ESP32-S2 native USB CDC (running app)
+    (0x10C4, 0xEA60),   # CP2102 / CP2104 (Silicon Labs) — bridged dev boards
+    (0x1A86, 0x7523),   # CH340G — bridged dev boards
+]
+
+DEVBOARD_CHIP = "esp32s2"
+
+DEVBOARD_CONNECT_INSTRUCTIONS = (
+    "Flipper Zero Wi-Fi Dev Board (ESP32-S2) not detected.\n\n"
+    "  1. Connect the DEV BOARD directly to this computer via its own USB-C port\n"
+    "     (not through the Flipper). \n"
+    "  2. Put it into bootloader/download mode: hold the BOOT button, tap RESET,\n"
+    "     then release BOOT.\n"
+    "  3. The board enumerates as Espressif native USB (303A:0002) or, on bridged\n"
+    "     boards, /dev/ttyUSB* (CP2102/CH340).\n\n"
+    "  Linux permission fix if needed:\n"
+    "    sudo usermod -aG dialout $USER  (then log out/in)\n"
+    "    Verify: ls -la /dev/ttyACM* /dev/ttyUSB*"
+)
+
+# ESP32 Marauder — the maintained repo ships a dedicated Flipper Dev Board (S2)
+# build. Asset naming has varied across releases; try the flipper/S2 patterns in
+# order. The Flipper build is a single combined image flashed at 0x0.
+DEVBOARD_MARAUDER_OWNER = "justcallmekoko"
+DEVBOARD_MARAUDER_REPO  = "ESP32Marauder"
+DEVBOARD_MARAUDER_PATTERNS = [
+    r"esp32_marauder.*flipper.*\.bin",
+    r"esp32_marauder.*s2.*\.bin",
+]
+
+# Black Magic Probe (Black Magic Debug) — the project provides ESP32-S2 builds that
+# turn the dev board into a wireless/USB SWD-JTAG debugger. Exact release asset
+# naming is not guaranteed stable, so prepare_fn falls back to an operator-supplied
+# .bin and verifies presence before the flash. Combined image flashed at 0x0.
+DEVBOARD_BLACKMAGIC_OWNER = "blackmagic-debug"
+DEVBOARD_BLACKMAGIC_REPO  = "blackmagic"
+DEVBOARD_BLACKMAGIC_PATTERNS = [
+    r"blackmagic.*esp32.?s2.*\.bin",
+    r"blackmagic.*esp32.*\.bin",
+]
+
+
+def detect_devboard() -> bool:
+    return find_serial_port_by_vidpid(DEVBOARD_VID_PIDS) is not None
+
+
+def _run_devboard_esptool(args: list, timeout: int = 180) -> int:
+    """Run esptool as a Python module with streaming output (mirrors esp32d.py)."""
+    cmd = [sys.executable, "-m", "esptool"] + args
+    info(f"Running: {' '.join(cmd)}")
+    try:
+        return run_streaming(cmd, on_line=lambda l: info(f"  esptool: {l}"), timeout=timeout)
+    except FileNotFoundError:
+        err("esptool not found even after install attempt.")
+        info("Manual install: pip install esptool --break-system-packages")
+        return 1
+    except Exception as e:  # noqa: BLE001
+        err(f"esptool execution error: {e}")
+        return 1
+
+
+def _devboard_user_dir() -> Path:
+    """Where an operator may drop a firmware .bin when auto-download can't resolve it."""
+    d = get_firmware_dir("flipper_zero_devboard") / "user"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _devboard_download_asset(owner, repo, patterns, dest_dir, what):
+    """Download the first GitHub release asset matching any of *patterns* (regex)."""
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    tag, rel_url = check_latest_github_release(owner, repo)
+    if tag:
+        ok(f"  Latest {what} release: {tag}")
+    for pat in patterns:
+        url = get_github_release_asset_url(owner, repo, tag or "", pat)
+        if url:
+            fname = url.rsplit("/", 1)[-1]
+            dest = dest_dir / fname
+            if dest.exists() and dest.stat().st_size > 0:
+                ok(f"  {what} already present: {dest.name}")
+                return dest
+            if download_firmware(url, dest, what):
+                return dest
+    return None
+
+
+def op_devboard_info(port: str):
+    heading("Wi-Fi Dev Board Info")
+    info(f"Serial port : {port}")
+    info(f"ESP chip    : {DEVBOARD_CHIP}")
+    info("Running 'esptool chip_id' to query the ESP32-S2 dev board…")
+    info("Troubleshooting:")
+    info("  'Failed to connect' → Hold BOOT, tap RESET, release BOOT, then retry")
+    info("  'Permission denied' → sudo usermod -aG dialout $USER  (then log out/in)")
+    rc = _run_devboard_esptool(["--chip", DEVBOARD_CHIP, "--port", port,
+                                 "--baud", "115200", "chip_id"], timeout=60)
+    if rc == 0:
+        ok("Dev board info retrieved.")
+    else:
+        err("chip_id failed. See troubleshooting notes above.")
+
+
+def _run_devboard_marauder_payload(fw: dict, port: str):
+    state = {}
+    dest = get_firmware_dir("flipper_zero_devboard") / "marauder"
+
+    def prep():
+        binf = _devboard_download_asset(
+            DEVBOARD_MARAUDER_OWNER, DEVBOARD_MARAUDER_REPO,
+            DEVBOARD_MARAUDER_PATTERNS, dest, "ESP32 Marauder (Flipper Dev Board)")
+        if not binf:
+            # Fall back to an operator-supplied image before aborting.
+            user = _devboard_user_dir()
+            bins = sorted(user.glob("*marauder*.bin")) or sorted(user.glob("*.bin"))
+            binf = bins[0] if bins else None
+        if not binf:
+            err("  Could not fetch an ESP32 Marauder Flipper-Dev-Board .bin from the")
+            err(f"  latest release of {DEVBOARD_MARAUDER_OWNER}/{DEVBOARD_MARAUDER_REPO}.")
+            err(f"  Check https://github.com/{DEVBOARD_MARAUDER_OWNER}/{DEVBOARD_MARAUDER_REPO}/releases")
+            err(f"  and drop the flipper/S2 build .bin into {_devboard_user_dir()}")
+            return False
+        state["fw"] = binf
+        ok(f"  Marauder firmware ready: {binf.name}")
+        return True
+
+    def flash():
+        _run_devboard_esptool([
+            "--chip", DEVBOARD_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "0x0", str(state["fw"]),
+        ], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash ESP32 Marauder"),
+        info_fn=lambda: op_devboard_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            "Board    : Flipper Zero Wi-Fi Dev Board (ESP32-S2)",
+            f"Firmware : ESP32 Marauder ({DEVBOARD_MARAUDER_OWNER}/{DEVBOARD_MARAUDER_REPO}) → 0x0",
+            f"Port     : {port}",
+            "Flasher  : esptool --chip esp32s2 write_flash 0x0",
+        ],
+    )
+
+
+def _run_devboard_blackmagic_payload(fw: dict, port: str):
+    state = {}
+    dest = get_firmware_dir("flipper_zero_devboard") / "blackmagic"
+
+    def prep():
+        binf = _devboard_download_asset(
+            DEVBOARD_BLACKMAGIC_OWNER, DEVBOARD_BLACKMAGIC_REPO,
+            DEVBOARD_BLACKMAGIC_PATTERNS, dest, "Black Magic Probe (ESP32-S2)")
+        if not binf:
+            # Black Magic ESP32-S2 release asset naming is not guaranteed; fall back
+            # to an operator-supplied image and verify presence before flashing.
+            user = _devboard_user_dir()
+            bins = sorted(user.glob("*blackmagic*.bin")) or sorted(user.glob("*.bin"))
+            binf = bins[0] if bins else None
+        if not binf:
+            err("  Could not fetch a Black Magic Probe ESP32-S2 .bin from the latest")
+            err(f"  release of {DEVBOARD_BLACKMAGIC_OWNER}/{DEVBOARD_BLACKMAGIC_REPO}.")
+            err(f"  Check https://github.com/{DEVBOARD_BLACKMAGIC_OWNER}/{DEVBOARD_BLACKMAGIC_REPO}/releases")
+            err(f"  and drop the ESP32-S2 build .bin into {_devboard_user_dir()}")
+            return False
+        state["fw"] = binf
+        ok(f"  Black Magic firmware ready: {binf.name}")
+        return True
+
+    def flash():
+        _run_devboard_esptool([
+            "--chip", DEVBOARD_CHIP, "--port", port, "--baud", "921600",
+            "write_flash", "0x0", str(state["fw"]),
+        ], timeout=300)
+
+    run_firmware_payload(
+        fw.get("label", "Flash Black Magic Probe"),
+        info_fn=lambda: op_devboard_info(port),
+        prepare_fn=prep,
+        flash_fn=flash,
+        summary_lines=[
+            "Board    : Flipper Zero Wi-Fi Dev Board (ESP32-S2)",
+            f"Firmware : Black Magic Probe ({DEVBOARD_BLACKMAGIC_OWNER}/{DEVBOARD_BLACKMAGIC_REPO}) → 0x0",
+            f"Port     : {port}",
+            "Flasher  : esptool --chip esp32s2 write_flash 0x0",
+        ],
+    )
+
+
+def _is_devboard_payload(fw: dict) -> bool:
+    return "dev board" in str(fw.get("board", "")).strip().lower()
+
+
+def _devboard_flash_flow(fw: dict):
+    """Standalone flash flow for the ESP32-S2 Wi-Fi Dev Board (no Flipper/PyFlipper)."""
+    print_banner("Flipper Zero Wi-Fi Dev Board", "ESP32-S2 add-on — direct esptool flash")
+
+    heading("Dependency Check")
+    flavor = get_os_flavor()
+    info("Ensuring esptool + pyserial are available for ESP32-S2 flashing…")
+    if flavor in ("kali", "debian", "ubuntu", "linux"):
+        ensure_apt_packages(["esptool", "python3-serial"])
+    elif flavor == "macos":
+        ensure_brew_packages(["esptool"])
+    ensure_pip_packages([("esptool", "esptool>=4.7"), ("serial", "pyserial")])
+
+    heading("Device Detection")
+    info("Scanning for the ESP32-S2 dev board (native USB 303A:xxxx or CP2102/CH340)…")
+    found = verify_device_connection(
+        detect_devboard, "Flipper Zero Wi-Fi Dev Board",
+        DEVBOARD_CONNECT_INSTRUCTIONS, max_retries=3
+    )
+    if not found:
+        err("Wi-Fi Dev Board not detected. Exiting.")
+        sys.exit(1)
+    port = find_serial_port_by_vidpid(DEVBOARD_VID_PIDS)
+    if not port:
+        err("Dev board appeared but serial port could not be resolved. Exiting.")
+        sys.exit(1)
+    ok(f"Wi-Fi Dev Board found on {port}")
+
+    name = fw.get("firmware", "")
+    if name == "Marauder":
+        _run_devboard_marauder_payload(fw, port)
+    elif name == "BlackMagic":
+        _run_devboard_blackmagic_payload(fw, port)
+    else:
+        err(f"Unknown Wi-Fi Dev Board firmware payload: {name!r}")
+        info("  Supported: Marauder, BlackMagic")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     require_sudo()
+
+    # Wi-Fi Dev Board (ESP32-S2) payloads flash directly over the board's own USB
+    # port with esptool — intercept BEFORE Flipper CDC detection/PyFlipper.
+    fw_early = selected_firmware_payload()
+    if fw_early and _is_devboard_payload(fw_early):
+        _devboard_flash_flow(fw_early)
+        return
 
     flavor = get_os_flavor()
     if flavor == "linux":

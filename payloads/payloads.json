@@ -8,7 +8,7 @@
     },
     {
       "name": "Ethernet Mode",
-      "description": "Minimal one-liner payload that sets ATTACKMODE ECM_ETHERNET and CLIENT, placing the Bash Bunny into transparent Ethernet gadget mode. Useful as a base for network-pivoting payloads or as a standalone implant to provide an out-of-band Ethernet interface to the target host. No HID injection — purely a network mode enabler.",
+      "description": "Minimal one-liner payload that sets ATTACKMODE ECM_ETHERNET and CLIENT, placing the Bash Bunny into transparent Ethernet gadget mode. Useful as a base for network-pivoting payloads or as a standalone implant to provide an out-of-band Ethernet interface to the target host. No HID injection \u2014 purely a network mode enabler.",
       "path": "payloads/bash_bunny/ethernet-mode/payload.txt",
       "added": "2026-03-22T00:00:00Z"
     },
@@ -164,13 +164,13 @@
     },
     {
       "name": "Passive Mode (iptables DROP + ip addr flush, silent tap)",
-      "description": "Host-side bash script that configures the Plunder Bug interface for completely silent passive operation. Supports three modes via argument: 'enable' (adds iptables DROP OUTPUT rule for the tap interface + ip addr flush to remove the host IP + disables IPv6 SLAAC/RA acceptance), 'disable' (removes the iptables rule and restores interface), and 'capture' (runs tcpdump on the silenced interface). The enable mode ensures the host generates zero traffic on the tapped segment — no ARP, no IPv6 RA responses, no IP-level communication — making the tap undetectable from the network perspective.",
+      "description": "Host-side bash script that configures the Plunder Bug interface for completely silent passive operation. Supports three modes via argument: 'enable' (adds iptables DROP OUTPUT rule for the tap interface + ip addr flush to remove the host IP + disables IPv6 SLAAC/RA acceptance), 'disable' (removes the iptables rule and restores interface), and 'capture' (runs tcpdump on the silenced interface). The enable mode ensures the host generates zero traffic on the tapped segment \u2014 no ARP, no IPv6 RA responses, no IP-level communication \u2014 making the tap undetectable from the network perspective.",
       "path": "payloads/plunder_bug/capture-passive/capture.sh",
       "added": "2026-03-25T00:00:00Z"
     },
     {
       "name": "DNS Capture (port 53, live tshark decode, unique domain list)",
-      "description": "Host-side bash capture script targeting DNS traffic on the Plunder Bug tap interface. Runs tcpdump filtering port 53 to a PCAP while simultaneously running a live tshark decode stream using dns.flags.response==0 to display outbound query names in real time. Post-capture processing produces unique_domains.txt (deduplicated list of all queried FQDNs sorted by frequency) and internal_domains.txt (queries containing corp, internal, local, intranet, lan, ad., or dc. — indicating Active Directory and internal DNS infrastructure). Useful for passive network reconnaissance and internal naming convention discovery.",
+      "description": "Host-side bash capture script targeting DNS traffic on the Plunder Bug tap interface. Runs tcpdump filtering port 53 to a PCAP while simultaneously running a live tshark decode stream using dns.flags.response==0 to display outbound query names in real time. Post-capture processing produces unique_domains.txt (deduplicated list of all queried FQDNs sorted by frequency) and internal_domains.txt (queries containing corp, internal, local, intranet, lan, ad., or dc. \u2014 indicating Active Directory and internal DNS infrastructure). Useful for passive network reconnaissance and internal naming convention discovery.",
       "path": "payloads/plunder_bug/capture-dns/capture.sh",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -213,7 +213,7 @@
       "added": "2026-03-25T00:00:00Z"
     },
     {
-      "name": "EM410x Clone (read → parse UID → clone to T5577)",
+      "name": "EM410x Clone (read \u2192 parse UID \u2192 clone to T5577)",
       "description": "Proxmark3 script for cloning EM410x (125 kHz) access cards to a T5577 writable blank. Reads the source card with 'lf em 4x02 reader' or 'lf search', parses the 40-bit EM410x UID from the output, then clones it with 'lf em 410x clone --uid'. After cloning, performs a verification read to confirm the T5577 now emits the correct UID. Logs the original UID, clone operation result, and verification status. Compatible with EM4100, EM4102, and EM4200 source cards. Typical access control use case: cloning employee badge for authorized physical security testing.",
       "path": "payloads/proxmark3/rfid-clone-em410x.sh",
       "added": "2026-03-25T00:00:00Z"
@@ -226,12 +226,12 @@
     },
     {
       "name": "DESFire Enumeration (info + app IDs + file IDs per AID)",
-      "description": "Proxmark3 script for enumerating MIFARE DESFire (ISO 14443-A) card structure without authentication. Runs 'hf mfdes info' to get card UID, batch number, production date, hardware/software version, and free memory. Runs 'hf mfdes getappids' to list all Application IDs (AIDs) on the card. For each discovered AID, attempts 'hf mfdes getfileids' to list file IDs within the application. Logs the full card structure tree (AID → File IDs) without requiring master key or application keys. Useful for identifying what applications are hosted on a DESFire card (access control, transit, loyalty) before attempting key-based attacks.",
+      "description": "Proxmark3 script for enumerating MIFARE DESFire (ISO 14443-A) card structure without authentication. Runs 'hf mfdes info' to get card UID, batch number, production date, hardware/software version, and free memory. Runs 'hf mfdes getappids' to list all Application IDs (AIDs) on the card. For each discovered AID, attempts 'hf mfdes getfileids' to list file IDs within the application. Logs the full card structure tree (AID \u2192 File IDs) without requiring master key or application keys. Useful for identifying what applications are hosted on a DESFire card (access control, transit, loyalty) before attempting key-based attacks.",
       "path": "payloads/proxmark3/rfid-desfire-enum.sh",
       "added": "2026-03-25T00:00:00Z"
     },
     {
-      "name": "HID Clone (read FC/CN → clone to T5577)",
+      "name": "HID Clone (read FC/CN \u2192 clone to T5577)",
       "description": "Proxmark3 script for cloning HID Prox (26-bit Wiegand) and HID Corporate 1000 access cards to a T5577 writable blank. Reads the source card with 'lf hid reader' to extract the Facility Code (FC) and Card Number (CN). Clones using 'lf hid clone --fc [FC] --cn [CN]'. Performs a post-clone verification read to confirm the T5577 emits the correct FC/CN combination. Supports HID H10301 (standard 26-bit), H10302, H10304, and Corporate 1000 (35-bit) card formats. Logs the FC, CN, raw bit string, and clone verification result.",
       "path": "payloads/proxmark3/rfid-hid-clone.sh",
       "added": "2026-03-25T00:00:00Z"
@@ -276,7 +276,7 @@
     },
     {
       "name": "ADS-B Decode (dump1090 pipe, aircraft position/callsign)",
-      "description": "HackRF One script for receiving and decoding ADS-B (Automatic Dependent Surveillance–Broadcast) aircraft transponder signals at 1090 MHz. Pipes HackRF IQ output to dump1090 for Mode S/ADS-B decoding, or falls back to rtl_adsb if dump1090 is unavailable. Outputs decoded aircraft data including ICAO 24-bit address, callsign, altitude, speed, heading, and GPS position to a log file. Produces a summary of unique aircraft observed, altitude distribution, and a KML file for visualization in Google Earth. Primarily used for RF reception verification and airspace situational awareness.",
+      "description": "HackRF One script for receiving and decoding ADS-B (Automatic Dependent Surveillance\u2013Broadcast) aircraft transponder signals at 1090 MHz. Pipes HackRF IQ output to dump1090 for Mode S/ADS-B decoding, or falls back to rtl_adsb if dump1090 is unavailable. Outputs decoded aircraft data including ICAO 24-bit address, callsign, altitude, speed, heading, and GPS position to a log file. Produces a summary of unique aircraft observed, altitude distribution, and a KML file for visualization in Google Earth. Primarily used for RF reception verification and airspace situational awareness.",
       "path": "payloads/hackrf_one/hackrf-adsb-decode.sh",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -302,7 +302,7 @@
     },
     {
       "name": "BR/EDR Follow (ubertooth-follow target, L2CAP decode)",
-      "description": "Ubertooth One script for following a specific Bluetooth Classic (BR/EDR) connection. Takes a target BD_ADDR as argument and runs ubertooth-follow -t [target] to capture the baseband traffic between the target device and its piconet master. Captures to a PCAP and runs live tshark L2CAP dissection to decode protocol layers (L2CAP, RFCOMM, SDP, AVDTP, HFP, A2DP). Outputs decoded payload summary to log. Requires the Ubertooth to observe the initial connection establishment (FHS packet) to synchronize the frequency hopping sequence — most effective when positioned near the target at connection time.",
+      "description": "Ubertooth One script for following a specific Bluetooth Classic (BR/EDR) connection. Takes a target BD_ADDR as argument and runs ubertooth-follow -t [target] to capture the baseband traffic between the target device and its piconet master. Captures to a PCAP and runs live tshark L2CAP dissection to decode protocol layers (L2CAP, RFCOMM, SDP, AVDTP, HFP, A2DP). Outputs decoded payload summary to log. Requires the Ubertooth to observe the initial connection establishment (FHS packet) to synchronize the frequency hopping sequence \u2014 most effective when positioned near the target at connection time.",
       "path": "payloads/ubertooth_one/ubertooth-bredr-sniff.sh",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -360,7 +360,7 @@
     },
     {
       "name": "I2C Scan (binary mode, 0x00-0x77 address sweep, ACK detection)",
-      "description": "Bus Pirate 5 script that performs an I2C bus address scan using the Bus Pirate binary bitbang mode. Sends the BBIO1 entry sequence (20× 0x00) to enter binary mode, then switches to I2C mode (0x02 → expects 'I2C1' response). Iterates through I2C addresses 0x00-0x77, sends a START + address byte + WRITE bit, and checks the response byte[2] == 0x00 for ACK. Prints and logs each responding address. Restores the Bus Pirate to terminal mode after the scan. Detects EEPROMs, RTCs, sensors, GPIO expanders, and other I2C peripherals on the target board.",
+      "description": "Bus Pirate 5 script that performs an I2C bus address scan using the Bus Pirate binary bitbang mode. Sends the BBIO1 entry sequence (20\u00d7 0x00) to enter binary mode, then switches to I2C mode (0x02 \u2192 expects 'I2C1' response). Iterates through I2C addresses 0x00-0x77, sends a START + address byte + WRITE bit, and checks the response byte[2] == 0x00 for ACK. Prints and logs each responding address. Restores the Bus Pirate to terminal mode after the scan. Detects EEPROMs, RTCs, sensors, GPIO expanders, and other I2C peripherals on the target board.",
       "path": "payloads/bus_pirate_5/buspirate-i2c-scan.sh",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -476,7 +476,7 @@
     },
     {
       "name": "Key Extract (APS Transport Key frame detect, cleartext NWK key)",
-      "description": "Python KillerBee script for passive Zigbee network key extraction. Monitors a specified channel for APS (Application Support Sub-layer) Transport Key command frames (cmd_id 0x04), which are sent during device joining and contain the network key — sometimes transmitted in cleartext over networks using the 'well-known' trust center link key (0x5a6967426565416c6c69616e63653039). Extracts the 128-bit NWK key from the Transport Key payload and applies an entropy heuristic to distinguish random keys from predictable ones. Also watches for key-transport frames using the default Zigbee 3.0 install code derivation. Saves extracted keys with timestamp and source/destination addresses.",
+      "description": "Python KillerBee script for passive Zigbee network key extraction. Monitors a specified channel for APS (Application Support Sub-layer) Transport Key command frames (cmd_id 0x04), which are sent during device joining and contain the network key \u2014 sometimes transmitted in cleartext over networks using the 'well-known' trust center link key (0x5a6967426565416c6c69616e63653039). Extracts the 128-bit NWK key from the Transport Key payload and applies an entropy heuristic to distinguish random keys from predictable ones. Also watches for key-transport frames using the default Zigbee 3.0 install code derivation. Saves extracted keys with timestamp and source/destination addresses.",
       "path": "payloads/zigbee/zigbee-key-extract.py",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -536,7 +536,7 @@
   "flipper_zero": [
     {
       "name": "BadUSB PrivescAudit Windows (UAC bypass, PS stager, DuckyScript 1.0)",
-      "description": "Flipper Zero BadUSB payload in DuckyScript 1.0 syntax targeting Windows 10/11. Opens the Run dialog (GUI r), types a hidden PowerShell command that calls Start-Process powershell with -Verb runAs to request elevation. The elevated PowerShell session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, redirects output to %TEMP%\\privesc_out.txt, and POSTs the results back via iwr. Accepts the UAC prompt with ALT+Y after a 2-second delay. Note: DuckyScript 1.0 (used by Flipper Zero BadUSB) does not support VAR, EXTENSION, PASSIVE_WINDOWS_DETECT, or JITTER — uppercase keywords only.",
+      "description": "Flipper Zero BadUSB payload in DuckyScript 1.0 syntax targeting Windows 10/11. Opens the Run dialog (GUI r), types a hidden PowerShell command that calls Start-Process powershell with -Verb runAs to request elevation. The elevated PowerShell session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, redirects output to %TEMP%\\privesc_out.txt, and POSTs the results back via iwr. Accepts the UAC prompt with ALT+Y after a 2-second delay. Note: DuckyScript 1.0 (used by Flipper Zero BadUSB) does not support VAR, EXTENSION, PASSIVE_WINDOWS_DETECT, or JITTER \u2014 uppercase keywords only.",
       "path": "payloads/flipper_zero/badusb-privesc-windows/payload.txt",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -569,18 +569,30 @@
       "description": "Fetches the latest Momentum custom-firmware web-updater package (.tgz) from GitHub releases (Next-Flip/Momentum-Firmware, the successor to Xtreme), stages it in prepare_fn, then flashes via the existing SD update-package flow (flipper.update.install over RPC).",
       "path": "payloads/flipper_zero/firmware/momentum.qfw",
       "added": "2026-08-11T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Wi-Fi Dev Board: ESP32 Marauder",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Flashes the Flipper Zero Wi-Fi Dev Board (ESP32-S2 add-on) with ESP32 Marauder (Wi-Fi + BLE recon/attack). prepare_fn downloads the Marauder Flipper/S2 build .bin from justcallmekoko/ESP32Marauder releases (falls back to an operator-supplied .bin in firmware/flipper_zero_devboard/user/ and verifies presence) and ensures esptool is installed; flash_fn runs 'esptool --chip esp32s2 --port <port> write_flash 0x0 <fw.bin>' with streamed output. Board is flashed directly over its own USB-C port in BOOT/download mode, not through the Flipper.",
+      "path": "payloads/flipper_zero/firmware/flash-wifi-devboard-marauder.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Wi-Fi Dev Board: Black Magic Probe",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Flashes the Flipper Zero Wi-Fi Dev Board (ESP32-S2 add-on) with Black Magic Probe, turning it into a wireless/USB SWD-JTAG debugger. prepare_fn downloads the ESP32-S2 build .bin from blackmagic-debug/blackmagic releases (falls back to an operator-supplied .bin in firmware/flipper_zero_devboard/user/ and verifies presence) and ensures esptool is installed; flash_fn runs 'esptool --chip esp32s2 --port <port> write_flash 0x0 <fw.bin>' with streamed output. Board is flashed directly over its own USB-C port in BOOT/download mode.",
+      "path": "payloads/flipper_zero/firmware/flash-wifi-devboard-blackmagic.qfw",
+      "added": "2026-08-13T00:00:00Z"
     }
   ],
   "wifi_duck": [
     {
       "name": "PrivescAudit Windows (UAC elevation, PS stager)",
-      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens the Run dialog (gui r), types a PowerShell command that invokes Start-Process powershell with -Verb runAs to request elevation. The elevated PS session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, captures output to %TEMP%\\privesc_out.txt, and POSTs results back via iwr. Accepts the UAC dialog with alt y after a 2-second delay. WiFi Duck payloads are uploaded via the WiFi Duck web interface at http://192.168.4.1 — the duck connects to target WiFi and can be triggered remotely.",
+      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens the Run dialog (gui r), types a PowerShell command that invokes Start-Process powershell with -Verb runAs to request elevation. The elevated PS session downloads PrivescAudit-Windows.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\pa.ps1, executes it, captures output to %TEMP%\\privesc_out.txt, and POSTs results back via iwr. Accepts the UAC dialog with alt y after a 2-second delay. WiFi Duck payloads are uploaded via the WiFi Duck web interface at http://192.168.4.1 \u2014 the duck connects to target WiFi and can be triggered remotely.",
       "path": "payloads/wifi_duck/privesc-windows-audit/payload.txt",
       "added": "2026-03-25T00:00:00Z"
     },
     {
       "name": "SysAudit Windows (PowerShell, no UAC, current user audit)",
-      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens Run dialog (gui r) and launches a hidden non-elevated PowerShell session. Downloads SysAudit.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\sa.ps1, executes it, redirects output to %TEMP%\\sa_out.txt, and POSTs results back. No UAC elevation — runs entirely in the context of the currently logged-in user. Suitable for current-user privilege level audit without triggering UAC prompts that might alert the target.",
+      "description": "WiFi Duck payload in Arduino/DuckyScript hybrid syntax (all lowercase keywords) targeting Windows 10/11. Opens Run dialog (gui r) and launches a hidden non-elevated PowerShell session. Downloads SysAudit.ps1 from the attacker HTTP server (172.16.84.1:8080) to %TEMP%\\sa.ps1, executes it, redirects output to %TEMP%\\sa_out.txt, and POSTs results back. No UAC elevation \u2014 runs entirely in the context of the currently logged-in user. Suitable for current-user privilege level audit without triggering UAC prompts that might alert the target.",
       "path": "payloads/wifi_duck/sysaudit-windows/payload.txt",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -648,7 +660,7 @@
     },
     {
       "name": "CredExposure - Windows (PowerShell)",
-      "description": "PowerShell script auditing credential exposure vectors on Windows 10/11. Covers 8+ sections: (1) Windows Credential Manager entries (cmdkey /list, CredRead P/Invoke for generic/domain credentials); (2) WDigest registry key status (UseLogonCredential — indicates cleartext creds in LSASS memory); (3) SAM/SYSTEM/SECURITY registry hive accessibility and shadow copy paths for offline extraction; (4) Browser credential stores: Chrome/Edge Login Data (SQLite), Firefox logins.json; (5) PowerShell history file (ConsoleHost_history.txt) scanned for credentials; (6) Group Policy Preferences (GPP) password fields in SYSVOL (cpassword attributes in XML); (7) IIS applicationHost.config and web.config password attributes; (8) Registry-stored credentials (HKCU/HKLM AutoLogon keys, PuTTY sessions, WinSCP stored sessions, VNC password registry keys). Output formatted with section headers and credential values redacted to last 4 chars for safe reporting.",
+      "description": "PowerShell script auditing credential exposure vectors on Windows 10/11. Covers 8+ sections: (1) Windows Credential Manager entries (cmdkey /list, CredRead P/Invoke for generic/domain credentials); (2) WDigest registry key status (UseLogonCredential \u2014 indicates cleartext creds in LSASS memory); (3) SAM/SYSTEM/SECURITY registry hive accessibility and shadow copy paths for offline extraction; (4) Browser credential stores: Chrome/Edge Login Data (SQLite), Firefox logins.json; (5) PowerShell history file (ConsoleHost_history.txt) scanned for credentials; (6) Group Policy Preferences (GPP) password fields in SYSVOL (cpassword attributes in XML); (7) IIS applicationHost.config and web.config password attributes; (8) Registry-stored credentials (HKCU/HKLM AutoLogon keys, PuTTY sessions, WinSCP stored sessions, VNC password registry keys). Output formatted with section headers and credential values redacted to last 4 chars for safe reporting.",
       "path": "payloads/other/CredExposure-Windows.ps1",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -666,7 +678,7 @@
     },
     {
       "name": "PrivescAudit - Windows (PowerShell)",
-      "description": "PowerShell privilege escalation audit script for Windows 10/11 and Server 2016+. Covers 8+ sections: (1) Token privileges (whoami /priv) — flags dangerous privileges: SeImpersonatePrivilege, SeAssignPrimaryTokenPrivilege, SeDebugPrivilege, SeTakeOwnershipPrivilege, SeLoadDriverPrivilege; (2) Unquoted service paths with spaces (Get-WmiObject Win32_Service where PathName has spaces and no quotes); (3) Writable service binary paths (icacls check on service executables); (4) Weak service ACLs (sc sdshow, check for SERVICE_CHANGE_CONFIG for non-admin users); (5) AlwaysInstallElevated registry keys in HKCU and HKLM; (6) Modifiable scheduled tasks (Get-ScheduledTask ACL check); (7) DLL hijack candidates: services/apps with missing DLLs in writable directories (Procmon-style path not found simulation); (8) UAC bypass vectors: fodhelper, eventvwr, computerdefaults, sdclt registry hijacks; auto-elevation COM objects.",
+      "description": "PowerShell privilege escalation audit script for Windows 10/11 and Server 2016+. Covers 8+ sections: (1) Token privileges (whoami /priv) \u2014 flags dangerous privileges: SeImpersonatePrivilege, SeAssignPrimaryTokenPrivilege, SeDebugPrivilege, SeTakeOwnershipPrivilege, SeLoadDriverPrivilege; (2) Unquoted service paths with spaces (Get-WmiObject Win32_Service where PathName has spaces and no quotes); (3) Writable service binary paths (icacls check on service executables); (4) Weak service ACLs (sc sdshow, check for SERVICE_CHANGE_CONFIG for non-admin users); (5) AlwaysInstallElevated registry keys in HKCU and HKLM; (6) Modifiable scheduled tasks (Get-ScheduledTask ACL check); (7) DLL hijack candidates: services/apps with missing DLLs in writable directories (Procmon-style path not found simulation); (8) UAC bypass vectors: fodhelper, eventvwr, computerdefaults, sdclt registry hijacks; auto-elevation COM objects.",
       "path": "payloads/other/PrivescAudit-Windows.ps1",
       "added": "2026-03-25T00:00:00Z"
     },
@@ -684,19 +696,19 @@
     },
     {
       "name": "PersistenceSurvey - Linux (systemd, ld.so.preload, PAM, APT hooks)",
-      "description": "Bash script surveying persistence mechanisms on Linux systems. Covers 12 sections: (1) systemd service units and timers in all locations (/etc/systemd/system, /lib/systemd/system, user units) — flags non-package-manager units; (2) /etc/rc.local and SysV init scripts in /etc/init.d; (3) Cron jobs for all users and system cron directories; (4) /etc/ld.so.preload entries (LD_PRELOAD rootkit vector); (5) PAM configuration files (/etc/pam.d/) screened for unusual modules or pam_exec entries; (6) /etc/profile.d/, .bashrc, .bash_profile, .zshrc in all home dirs; (7) APT/dpkg hooks (/etc/apt/apt.conf.d/, DPkg::Post-Invoke); (8) At jobs (atq); (9) udev rules (/etc/udev/rules.d/) with RUN+= entries; (10) Kernel modules (lsmod) compared against package-managed module list; (11) inetd/xinetd service definitions; (12) MOTD scripts (/etc/update-motd.d/) with writable entries.",
+      "description": "Bash script surveying persistence mechanisms on Linux systems. Covers 12 sections: (1) systemd service units and timers in all locations (/etc/systemd/system, /lib/systemd/system, user units) \u2014 flags non-package-manager units; (2) /etc/rc.local and SysV init scripts in /etc/init.d; (3) Cron jobs for all users and system cron directories; (4) /etc/ld.so.preload entries (LD_PRELOAD rootkit vector); (5) PAM configuration files (/etc/pam.d/) screened for unusual modules or pam_exec entries; (6) /etc/profile.d/, .bashrc, .bash_profile, .zshrc in all home dirs; (7) APT/dpkg hooks (/etc/apt/apt.conf.d/, DPkg::Post-Invoke); (8) At jobs (atq); (9) udev rules (/etc/udev/rules.d/) with RUN+= entries; (10) Kernel modules (lsmod) compared against package-managed module list; (11) inetd/xinetd service definitions; (12) MOTD scripts (/etc/update-motd.d/) with writable entries.",
       "path": "payloads/other/PersistenceSurvey-Linux.sh",
       "added": "2026-03-25T00:00:00Z"
     },
     {
       "name": "PersistenceSurvey - macOS (LaunchDaemons/Agents, DYLD, Login Hooks, XPC)",
-      "description": "Bash script surveying persistence mechanisms on macOS 12+. Covers 12 sections: (1) LaunchDaemons in /Library/LaunchDaemons and /System/Library/LaunchDaemons — flags non-Apple plists; (2) LaunchAgents in /Library/LaunchAgents, /System/Library/LaunchAgents, and ~/Library/LaunchAgents; (3) Login Items (osascript/system events query and legacy /Library/StartupItems); (4) Login Hooks (com.apple.loginwindow plist LoginHook/LogoutHook keys); (5) DYLD_INSERT_LIBRARIES references in launchd plists and shell profiles; (6) crontab entries for all users and /etc/periodic scripts; (7) XPC service bundles in /Library/Application Support and app bundles with writable paths; (8) Kernel extensions (kextstat) — third-party extensions flagged; (9) /etc/rc.common and /etc/rc.server (legacy); (10) .bashrc/.zshrc/.profile in all home dirs; (11) Emond rules (/etc/emond.d/); (12) MDM-deployed profiles (profiles list -all) that configure persistence via MCX/payloads.",
+      "description": "Bash script surveying persistence mechanisms on macOS 12+. Covers 12 sections: (1) LaunchDaemons in /Library/LaunchDaemons and /System/Library/LaunchDaemons \u2014 flags non-Apple plists; (2) LaunchAgents in /Library/LaunchAgents, /System/Library/LaunchAgents, and ~/Library/LaunchAgents; (3) Login Items (osascript/system events query and legacy /Library/StartupItems); (4) Login Hooks (com.apple.loginwindow plist LoginHook/LogoutHook keys); (5) DYLD_INSERT_LIBRARIES references in launchd plists and shell profiles; (6) crontab entries for all users and /etc/periodic scripts; (7) XPC service bundles in /Library/Application Support and app bundles with writable paths; (8) Kernel extensions (kextstat) \u2014 third-party extensions flagged; (9) /etc/rc.common and /etc/rc.server (legacy); (10) .bashrc/.zshrc/.profile in all home dirs; (11) Emond rules (/etc/emond.d/); (12) MDM-deployed profiles (profiles list -all) that configure persistence via MCX/payloads.",
       "path": "payloads/other/PersistenceSurvey-macOS.sh",
       "added": "2026-03-25T00:00:00Z"
     },
     {
       "name": "PersistenceSurvey - Windows (PowerShell)",
-      "description": "PowerShell script surveying persistence mechanisms on Windows 10/11 and Server 2016+. Covers 10+ sections: (1) Registry Run/RunOnce keys (HKCU/HKLM) including per-user and system-wide; (2) Scheduled tasks (Get-ScheduledTask) — flags tasks not signed by Microsoft or with actions pointing to writable paths; (3) Services (Get-Service / Get-WmiObject Win32_Service) with non-standard binary paths; (4) WMI event subscriptions (Get-WMIObject __EventFilter, __EventConsumer, __FilterToConsumerBinding) — a common fileless persistence vector; (5) LSA security packages and notification DLLs (HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa); (6) Image File Execution Options (IFEO) debugger keys — used for Accessibility Feature backdoors; (7) BootExecute registry value for pre-boot persistence; (8) AppInit_DLLs and AppCertDlls; (9) Browser extension inventory (Chrome/Edge manifest.json paths); (10) Startup folders (shell:startup, shell:common startup). Each section outputs the mechanism name, path/key, value, and a risk flag for non-standard entries.",
+      "description": "PowerShell script surveying persistence mechanisms on Windows 10/11 and Server 2016+. Covers 10+ sections: (1) Registry Run/RunOnce keys (HKCU/HKLM) including per-user and system-wide; (2) Scheduled tasks (Get-ScheduledTask) \u2014 flags tasks not signed by Microsoft or with actions pointing to writable paths; (3) Services (Get-Service / Get-WmiObject Win32_Service) with non-standard binary paths; (4) WMI event subscriptions (Get-WMIObject __EventFilter, __EventConsumer, __FilterToConsumerBinding) \u2014 a common fileless persistence vector; (5) LSA security packages and notification DLLs (HKLM\\SYSTEM\\CurrentControlSet\\Control\\Lsa); (6) Image File Execution Options (IFEO) debugger keys \u2014 used for Accessibility Feature backdoors; (7) BootExecute registry value for pre-boot persistence; (8) AppInit_DLLs and AppCertDlls; (9) Browser extension inventory (Chrome/Edge manifest.json paths); (10) Startup folders (shell:startup, shell:common startup). Each section outputs the mechanism name, path/key, value, and a risk flag for non-standard entries.",
       "path": "payloads/other/PersistenceSurvey-Windows.ps1",
       "added": "2026-03-25T00:00:00Z"
     }
@@ -931,20 +943,20 @@
   ],
   "badusb": [
     {
-      "name": "SysAudit Windows (DuckyScript — DigiSpark/Arduino)",
-      "description": "DuckyScript-compatible HID injection payload for BadUSB devices (DigiSpark, Arduino Micro, Pro Micro). Opens an elevated PowerShell prompt (Win+R → powershell → Ctrl+Shift+Enter → Alt+Y), downloads SysAudit.ps1 from a configurable $SERVER:$PORT, and executes it. Edit SERVER and PORT variables before deployment. Compile to device-specific format: micronucleus hex for DigiSpark, avrdude for Arduino.",
+      "name": "SysAudit Windows (DuckyScript \u2014 DigiSpark/Arduino)",
+      "description": "DuckyScript-compatible HID injection payload for BadUSB devices (DigiSpark, Arduino Micro, Pro Micro). Opens an elevated PowerShell prompt (Win+R \u2192 powershell \u2192 Ctrl+Shift+Enter \u2192 Alt+Y), downloads SysAudit.ps1 from a configurable $SERVER:$PORT, and executes it. Edit SERVER and PORT variables before deployment. Compile to device-specific format: micronucleus hex for DigiSpark, avrdude for Arduino.",
       "path": "payloads/badusb/sysaudit-windows/payload.txt",
       "added": "2026-03-28T00:00:00Z"
     },
     {
-      "name": "Reverse Shell Dropper (DuckyScript — Windows)",
+      "name": "Reverse Shell Dropper (DuckyScript \u2014 Windows)",
       "description": "HID injection payload for BadUSB devices targeting Windows. Opens Run dialog, launches hidden PowerShell, downloads and executes a reverse shell dropper from a configurable URL. Includes JITTER timing for evasion. Configure LHOST and LPORT before compiling.",
       "path": "payloads/badusb/reverse-shell-windows/payload.txt",
       "added": "2026-03-28T00:00:00Z"
     },
     {
-      "name": "Lock Screen Bypass Info (DuckyScript — macOS)",
-      "description": "DuckyScript payload for BadUSB targeting macOS. Injects keystrokes to open Terminal (Cmd+Space → Terminal), then runs a system information collection one-liner that dumps hostname, user, IP, and running processes to a hidden file in /tmp. Configurable exfil endpoint.",
+      "name": "Lock Screen Bypass Info (DuckyScript \u2014 macOS)",
+      "description": "DuckyScript payload for BadUSB targeting macOS. Injects keystrokes to open Terminal (Cmd+Space \u2192 Terminal), then runs a system information collection one-liner that dumps hostname, user, IP, and running processes to a hidden file in /tmp. Configurable exfil endpoint.",
       "path": "payloads/badusb/macos-sysinfo/payload.txt",
       "added": "2026-03-28T00:00:00Z"
     },
@@ -962,7 +974,7 @@
     },
     {
       "name": "FIRMWARE - Compile & flash Arduino sketch (.ino)",
-      "description": "Locally compiles a selected Arduino sketch (.ino) to a .hex with arduino-cli — auto-installing the correct board core (DigiSpark digistump / Arduino Micro / SparkFun Pro Micro; board auto-detected or QUIVER_BADUSB_BOARD) — then flashes via micronucleus (DigiSpark) or avrdude avr109 (ATmega32U4). Sketch comes from the selected payload, the firmware dir, or public repos imported via import_community_payloads.py --tools badusb.",
+      "description": "Locally compiles a selected Arduino sketch (.ino) to a .hex with arduino-cli \u2014 auto-installing the correct board core (DigiSpark digistump / Arduino Micro / SparkFun Pro Micro; board auto-detected or QUIVER_BADUSB_BOARD) \u2014 then flashes via micronucleus (DigiSpark) or avrdude avr109 (ATmega32U4). Sketch comes from the selected payload, the firmware dir, or public repos imported via import_community_payloads.py --tools badusb.",
       "path": "payloads/badusb/firmware/compile-sketch.qfw",
       "added": "2026-08-11T00:00:00Z"
     }
@@ -1028,7 +1040,7 @@
   "dwm3001cdk": [
     {
       "name": "UWB Ranging Demo (TWR)",
-      "description": "Two-Way Ranging (TWR) demo configuration for DWM3001CDK. Configures the DW3110 UWB transceiver for IEEE 802.15.4z HRP UWB ranging. Measures distance between two DWM3001CDK nodes. Outputs ranging results over serial CDC at 115200 baud. Requires two DWM3001CDK units — one as initiator, one as responder.",
+      "description": "Two-Way Ranging (TWR) demo configuration for DWM3001CDK. Configures the DW3110 UWB transceiver for IEEE 802.15.4z HRP UWB ranging. Measures distance between two DWM3001CDK nodes. Outputs ranging results over serial CDC at 115200 baud. Requires two DWM3001CDK units \u2014 one as initiator, one as responder.",
       "path": "payloads/dwm3001cdk/uwb-ranging/config.json",
       "added": "2026-03-28T00:00:00Z"
     },
@@ -1106,7 +1118,7 @@
   "nrf52833_dk": [
     {
       "name": "FIRMWARE - Flash nRF Sniffer firmware",
-      "description": "Auto-flashes the Nordic 'nRF Sniffer for Bluetooth LE' firmware to the nRF52833-DK (PCA10100) over the onboard J-Link (SWD). Runs the full flow with NO interactive menu: device info, PREPARE (download the nRF52833 sniffer hex via nrfutil ble-sniffer, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before flashing. Sniffle does NOT run on Nordic parts — this board uses nRF Sniffer.",
+      "description": "Auto-flashes the Nordic 'nRF Sniffer for Bluetooth LE' firmware to the nRF52833-DK (PCA10100) over the onboard J-Link (SWD). Runs the full flow with NO interactive menu: device info, PREPARE (download the nRF52833 sniffer hex via nrfutil ble-sniffer, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before flashing. Sniffle does NOT run on Nordic parts \u2014 this board uses nRF Sniffer.",
       "path": "payloads/nrf52833_dk/firmware/flash-nrf-sniffer.qfw",
       "added": "2026-08-10T00:00:00Z"
     }
@@ -1114,7 +1126,7 @@
   "bluefruit_le_sniffer": [
     {
       "name": "FIRMWARE - Reflash firmware (J-Link + SWD)",
-      "description": "Reflashes the Adafruit Bluefruit LE Sniffer (#2269, nRF51822) over an EXTERNAL SWD programmer (no DFU/USB path exists on this board). Runs with NO interactive menu: device info, PREPARE (locate the operator-supplied nRF51 sniffer hex under the firmware dir, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before writing. Requires SWD wiring (SWDIO/SWCLK/GND/VTref) and an nRF51 firmware image — if either is missing, prep aborts BEFORE the confirmation.",
+      "description": "Reflashes the Adafruit Bluefruit LE Sniffer (#2269, nRF51822) over an EXTERNAL SWD programmer (no DFU/USB path exists on this board). Runs with NO interactive menu: device info, PREPARE (locate the operator-supplied nRF51 sniffer hex under the firmware dir, provision nrfjprog/JLink/openocd), summary, then a single 'Are you sure?' before writing. Requires SWD wiring (SWDIO/SWCLK/GND/VTref) and an nRF51 firmware image \u2014 if either is missing, prep aborts BEFORE the confirmation.",
       "path": "payloads/bluefruit_le_sniffer/firmware/reflash-firmware.qfw",
       "added": "2026-08-10T00:00:00Z"
     }
@@ -1245,6 +1257,112 @@
       "description": "Wires the existing cc2538-bsl coordinator flash. prepare_fn clones JelmerT/cc2538-bsl and locates a Z-Stack coordinator .hex (Koenkk/Z-Stack-firmware) in the user dir; flash runs cc2538-bsl -ewv. Requires DIP switch Position 2.",
       "path": "payloads/lilygo_tzigbee/firmware/flash-zigbee-coordinator.qfw",
       "added": "2026-08-11T00:00:00Z"
+    }
+  ],
+  "catsniffer": [
+    {
+      "name": "FIRMWARE - Flash Sniffle BLE sniffer",
+      "description": "Auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Flashes the NCC Group Sniffle BLE 5 sniffer (CC1352P7 prebuilt hex) to the CatSniffer v3 over the CC1352P7 serial bootloader (cc2538-bsl) through the SAMD21 bridge. Bluetooth Rx.",
+      "path": "payloads/catsniffer/firmware/flash-sniffle.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash CatSniffer multiprotocol firmware",
+      "description": "Auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Flashes the Electronic Cats multi-protocol CatSniffer firmware (Zigbee/802.15.4 + sub-GHz sniff) to the CC1352P7 via cc2538-bsl through the SAMD21 bridge. Zigbee + sub-GHz Rx.",
+      "path": "payloads/catsniffer/firmware/flash-multiprotocol.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash SmartRF 802.15.4 Zigbee sniffer",
+      "description": "Auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Flashes the TI SmartRF-style 802.15.4 / Zigbee packet-sniffer firmware to the CC1352P7 via cc2538-bsl through the SAMD21 bridge. Zigbee Rx.",
+      "path": "payloads/catsniffer/firmware/flash-zigbee-sniffer.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "raven": [
+    {
+      "name": "FIRMWARE - Flash KillerBee firmware (Zigbee sniffer/injector)",
+      "description": "Auto-run: device info -> prepare (installs dfu-programmer, downloads kb-rzusbstick-006.hex from riverloopsec/killerbee) -> summary -> single 'Are you sure?' -> flash via dfu-programmer at90usb1287 (erase -> flash -> reset) over USB DFU. Requires DFU mode: hold the HWB button while plugging the stick in so it enumerates as the Atmel DFU bootloader (VID:PID 03EB:2FFB). avrdude + hardware JTAG programmer is the documented fallback.",
+      "path": "payloads/raven/firmware/flash-killerbee.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "canable": [
+    {
+      "name": "FIRMWARE - Flash candleLight (gs_usb / SocketCAN)",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash",
+      "path": "payloads/canable/firmware/flash-candlelight.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash slcan (serial-line CAN)",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash",
+      "path": "payloads/canable/firmware/flash-slcan.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "nordic_nrf52840_dongle": [
+    {
+      "name": "FIRMWARE - Flash nRF Sniffer (DFU)",
+      "description": "Auto-flashes Nordic's 'nRF Sniffer for 802.15.4/BLE' firmware to the nRF52840 Dongle (PCA10059) over USB DFU using nrfutil and the Open Bootloader. Runs the full flow with NO interactive menu: shows device info, PREPARES (ensures nrfutil, locates/packages the dongle sniffer .hex into a DFU .zip, waits for the dongle to be put in bootloader mode via RESET), prints a summary, and only then shows a single 'Are you sure?' confirmation before writing. Turns the dongle into a passive BLE/Zigbee sniffer for Wireshark (Rx only).",
+      "path": "payloads/nordic_nrf52840_dongle/firmware/flash-nrf-sniffer.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash ButteRFly (BLE MITM)",
+      "description": "Auto-flashes the whad-team ButteRFly firmware to the nRF52840 Dongle (PCA10059) over USB DFU (nrfutil + Open Bootloader), adding BLE Rx/Tx (active MITM via the WHAD host tools) to a board that otherwise runs the nRF Sniffer (BLE Rx only). Runs with NO menu: device info -> PREPARE (ensure nrfutil, locate or download butterfly firmware and package it as a DFU .zip, wait for RESET/bootloader) -> summary -> single 'Are you sure?' -> flash. Aborts before the confirm if the firmware or DFU port is unavailable.",
+      "path": "payloads/nordic_nrf52840_dongle/firmware/flash-butterfly.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "heltec_uwb": [
+    {
+      "name": "FIRMWARE - Flash UWB Sniffer Firmware (SWUP)",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Fetches the vendor forthink_uwb_sniffer_tool repo (SWUP updater + encrypted firmware .pkg), verifies the FT4222H bridge is present, then writes the stock UWB sniffer firmware to the NXP NCJ29D5 through the FT4222H USB-SPI bridge via the SWUP updater; aborts before confirm if the device, updater, or .pkg is missing.",
+      "path": "payloads/heltec_uwb/firmware/uwb-sniffer.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Flash Custom Firmware Package (SWUP)",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. Fetches the vendor SWUP updater, verifies the FT4222H bridge, and locates an operator-supplied .pkg dropped into the tool's firmware user/ dir, then flashes it to the NCJ29D5 via SWUP; aborts before confirm if the device, updater, or .pkg is missing.",
+      "path": "payloads/heltec_uwb/firmware/custom-pkg.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "dwm3000evb": [
+    {
+      "name": "FIRMWARE - Flash Qorvo DWM3000 Two-Way Ranging (host Nucleo)",
+      "description": "auto-run: device info -> prepare (download/install/build) -> summary -> single 'Are you sure?' -> flash. DWM3000EVB is a DW3000 UWB shield with no MCU; this writes Qorvo's DW3000 two-way-ranging example firmware to the HOST Nucleo-F429ZI over its ST-Link (st-flash write @ 0x08000000, STM32CubeProgrammer fallback for .hex/.elf). Prepare ensures a flasher (stlink-tools/CubeProgrammer) + the host ST-Link and locates an operator-supplied image (Qorvo SDK is registration-gated: QUIVER_DWM3000_FW path, QUIVER_DWM3000_FW_URL download, or the firmware dir), aborting before confirm if anything is missing.",
+      "path": "payloads/dwm3000evb/firmware/qorvo-ranging.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "rpi_4b": [
+    {
+      "name": "FIRMWARE - Flash OS Image to SD/USB",
+      "description": "Auto-provisions a bootable OS to a removable SD/USB/NVMe target with NO menu: device info, PREPARE (ensures rpi-imager or dd; downloads Raspberry Pi OS 64-bit via the latest redirect and SHA-256 verifies it, or takes a Kali ARM64 URL / local .img/.img.xz/.img.gz; enumerates removable/external disks and REFUSES the host system disk; operator picks the target), summary, single 'Are you sure?' confirm, then writes via rpi-imager --cli (dd fallback) with a final pre-write system-disk re-check.",
+      "path": "payloads/rpi_4b/firmware/image-os.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update Bootloader EEPROM",
+      "description": "Auto-updates the Pi 4B SPI-EEPROM bootloader with NO menu: device info, PREPARE (verifies this module is running ON a Raspberry Pi 4B, installs rpi-eeprom if needed, reads current bootloader status), summary, single 'Are you sure?' confirm, then stages the latest bootloader with rpi-eeprom-update -a (applied on the next reboot). Aborts before the confirm if not on a Pi 4B.",
+      "path": "payloads/rpi_4b/firmware/update-eeprom.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    }
+  ],
+  "rpi_5": [
+    {
+      "name": "FIRMWARE - Flash OS Image to SD/USB",
+      "description": "Auto-provisions a bootable OS to a removable SD/USB/NVMe target with NO menu: device info, PREPARE (ensures rpi-imager or dd; downloads Raspberry Pi OS 64-bit via the latest redirect and SHA-256 verifies it, or takes a Kali ARM64 URL / local .img/.img.xz/.img.gz; enumerates removable/external disks and REFUSES the host system disk; operator picks the target), summary, single 'Are you sure?' confirm, then writes via rpi-imager --cli (dd fallback) with a final pre-write system-disk re-check.",
+      "path": "payloads/rpi_5/firmware/image-os.qfw",
+      "added": "2026-08-13T00:00:00Z"
+    },
+    {
+      "name": "FIRMWARE - Update Bootloader EEPROM",
+      "description": "Auto-updates the Pi 5 SPI-EEPROM bootloader with NO menu: device info, PREPARE (verifies this module is running ON a Raspberry Pi 5, installs rpi-eeprom if needed, reads current bootloader status), summary, single 'Are you sure?' confirm, then stages the latest bootloader with rpi-eeprom-update -a (applied on the next reboot). Aborts before the confirm if not on a Pi 5.",
+      "path": "payloads/rpi_5/firmware/update-eeprom.qfw",
+      "added": "2026-08-13T00:00:00Z"
     }
   ]
 }

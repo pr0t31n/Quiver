@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.25.1"
+VERSION = "1.26.0"
 
 import concurrent.futures
 import ipaddress
@@ -877,6 +877,78 @@ TOOLS = {
             "vid_pids": [(0x10C4, 0xEA60)],   # CP2104 USB-UART (shared VID:PID)
         },
     },
+
+    # ── Electronic Cats CatSniffer v3 (CC1352P7 multi-protocol) ───────────────
+    "catsniffer": {
+        "name":   "CatSniffer v3",
+        "script": "catsniffer.py",
+        "icon":   "🐱",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── RZUSBSTICK / AVR Raven (KillerBee Zigbee) ─────────────────────────────
+    "raven": {
+        "name":   "RZUSBSTICK / AVR Raven",
+        "script": "raven.py",
+        "icon":   "🦅",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── nRF52840 Dongle (PCA10059, USB-DFU) ───────────────────────────────────
+    "nordic_nrf52840_dongle": {
+        "name":   "nRF52840 Dongle",
+        "script": "nordic_nrf52840_dongle.py",
+        "icon":   "🟣",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── Heltec UWB Sniffer Dongle (NXP NCJ29D5) ───────────────────────────────
+    "heltec_uwb": {
+        "name":   "Heltec UWB Sniffer Dongle",
+        "script": "heltec_uwb.py",
+        "icon":   "📍",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── DWM3000EVB (Qorvo DW3000 UWB shield on host Nucleo) ────────────────────
+    "dwm3000evb": {
+        "name":   "DWM3000EVB",
+        "script": "dwm3000evb.py",
+        "icon":   "📐",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── CANable (USB-CAN) ─────────────────────────────────────────────────────
+    "canable": {
+        "name":   "CANable (USB-CAN)",
+        "script": "canable.py",
+        "icon":   "🚗",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── Raspberry Pi 4B (ARM64 SBC / host platform) ───────────────────────────
+    "rpi_4b": {
+        "name":   "Raspberry Pi 4B",
+        "script": "rpi_4b.py",
+        "icon":   "🍓",
+        "ssh":    None,
+        "shell":  None,
+    },
+
+    # ── Raspberry Pi 5 (ARM64 SBC / host platform) ────────────────────────────
+    "rpi_5": {
+        "name":   "Raspberry Pi 5",
+        "script": "rpi_5.py",
+        "icon":   "🍓",
+        "ssh":    None,
+        "shell":  None,
+    },
 }
 
 # ── Tool category groups ───────────────────────────────────────────────────────
@@ -949,6 +1021,7 @@ INTERFACES = {
     "usb_hid":   {"label": "USB HID",               "icon": "⌨"},
     "usb":       {"label": "USB (device/analysis)", "icon": "🔌"},
     "network":   {"label": "Ethernet / Network",    "icon": "🖧"},
+    "can":       {"label": "CAN Bus",               "icon": "🚗"},
     "serial":    {"label": "UART / SPI / I2C",      "icon": "🔗"},
     "debug":     {"label": "JTAG / SWD",            "icon": "🐞"},
     "video":     {"label": "HDMI / Video",          "icon": "🖥"},
@@ -1005,6 +1078,14 @@ TOOL_INTERFACES = {
     "jlink_edu_mini":       ["debug"],
     "stlink_v2":            ["debug"],
     "manual_usb_drive":     ["host"],
+    "catsniffer":           ["bluetooth", "zigbee", "subghz"],
+    "raven":                ["zigbee"],
+    "nordic_nrf52840_dongle": ["bluetooth", "zigbee"],
+    "heltec_uwb":           ["uwb"],
+    "dwm3000evb":           ["uwb"],
+    "canable":              ["can"],
+    "rpi_4b":               ["host", "wifi", "bluetooth", "network"],
+    "rpi_5":                ["host", "wifi", "bluetooth", "network"],
 }
 
 # ── Functions (interface-specific) ────────────────────────────────────────────
@@ -1027,6 +1108,7 @@ INTERFACE_FUNCTIONS = {
     "sdr":       _RADIO_FUNCS,
     "uwb":       _RADIO_FUNCS,
     "ir":        _RADIO_FUNCS,
+    "can":       _RADIO_FUNCS,
     "rfid": [
         {"id": "read",      "label": "Read",       "requires": ["read"]},
         {"id": "write",     "label": "Write",      "requires": ["write"]},
@@ -1118,6 +1200,14 @@ TOOL_FUNCTIONS = {
     "jlink_edu_mini":       {"debug": ["read", "write"]},
     "stlink_v2":            {"debug": ["read", "write"]},
     "manual_usb_drive":     {"host": ["audit"]},
+    "catsniffer":           {"bluetooth": ["rx"], "zigbee": ["rx"], "subghz": ["rx", "tx"]},
+    "raven":                {"zigbee": ["rx", "tx"]},
+    "nordic_nrf52840_dongle": {"bluetooth": ["rx", "tx"], "zigbee": ["rx", "tx"]},
+    "heltec_uwb":           {"uwb": ["rx", "tx"]},
+    "dwm3000evb":           {"uwb": ["rx", "tx"]},
+    "canable":              {"can": ["rx", "tx"]},
+    "rpi_4b":               {"host": ["audit"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"], "network": ["capture"]},
+    "rpi_5":                {"host": ["audit"], "wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"], "network": ["capture"]},
 }
 
 # ── Firmware function coverage ────────────────────────────────────────────────
@@ -1173,6 +1263,25 @@ FIRMWARE_FUNCTIONS = {
     "payloads/flipper_zero/firmware/unleashed.qfw":   _FLIPPER_FULL,
     "payloads/flipper_zero/firmware/roguemaster.qfw": _FLIPPER_FULL,
     "payloads/flipper_zero/firmware/momentum.qfw":    _FLIPPER_FULL,
+    # Flipper Wi-Fi Dev Board (ESP32-S2) — Marauder Wi-Fi + BLE Rx/Tx
+    "payloads/flipper_zero/firmware/flash-wifi-devboard-marauder.qfw": {"wifi": ["rx", "tx"], "bluetooth": ["rx", "tx"]},
+    # CatSniffer v3 (CC1352P7) — sniffer firmwares (Rx subset of Rx/Tx silicon)
+    "payloads/catsniffer/firmware/flash-sniffle.qfw":         {"bluetooth": ["rx"]},
+    "payloads/catsniffer/firmware/flash-multiprotocol.qfw":   {"zigbee": ["rx"], "subghz": ["rx"]},
+    "payloads/catsniffer/firmware/flash-zigbee-sniffer.qfw":  {"zigbee": ["rx"]},
+    # RZUSBSTICK / AVR Raven — KillerBee sniffer + injector (Rx/Tx)
+    "payloads/raven/firmware/flash-killerbee.qfw":           {"zigbee": ["rx", "tx"]},
+    # nRF52840 Dongle — nRF Sniffer (Rx) vs ButteRFly MITM (Rx/Tx)
+    "payloads/nordic_nrf52840_dongle/firmware/flash-nrf-sniffer.qfw": {"bluetooth": ["rx"]},
+    "payloads/nordic_nrf52840_dongle/firmware/flash-butterfly.qfw":   {"bluetooth": ["rx", "tx"]},
+    # Heltec UWB (NXP NCJ29D5) — stock sniffer (Rx) vs custom pkg (Rx/Tx)
+    "payloads/heltec_uwb/firmware/uwb-sniffer.qfw":          {"uwb": ["rx"]},
+    "payloads/heltec_uwb/firmware/custom-pkg.qfw":           {"uwb": ["rx", "tx"]},
+    # DWM3000EVB — Qorvo two-way ranging (Rx/Tx)
+    "payloads/dwm3000evb/firmware/qorvo-ranging.qfw":        {"uwb": ["rx", "tx"]},
+    # CANable — candleLight / slcan (full CAN Rx/Tx)
+    "payloads/canable/firmware/flash-candlelight.qfw":       {"can": ["rx", "tx"]},
+    "payloads/canable/firmware/flash-slcan.qfw":             {"can": ["rx", "tx"]},
 }
 
 # ── Payload helpers ────────────────────────────────────────────────────────────
