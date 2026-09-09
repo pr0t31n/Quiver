@@ -35,6 +35,12 @@
       "description": "ATTACKMODE HID RNDIS payload targeting Windows 10/11. Serves PrivescAudit-Windows.ps1 and a runner wrapper over the Bunny's RNDIS HTTP server. Injects a single-quoted PowerShell command (to avoid shell expansion of dollar signs in the typed string) that downloads runner.ps1 to C:\\Windows\\Temp\\pea_runner.ps1 and executes it. Polls /loot/privesc-windows-audit/ for privesc_audit.zip for up to 300 seconds. The audit checks: token privileges, unquoted service paths, writable service binaries, AlwaysInstallElevated registry keys, UAC bypass vectors, modifiable scheduled tasks, DLL hijack opportunities, and weak ACLs on privileged paths.",
       "path": "payloads/bash_bunny/privesc-windows-audit/payload.txt",
       "added": "2026-03-25T00:00:00Z"
+    },
+    {
+      "name": "BIOS Password Brute Force (Manufacturer Backdoors + Common)",
+      "description": "ATTACKMODE HID payload that types candidate BIOS/UEFI passwords at a pre-boot password prompt. Phase 1 tries known manufacturer master/backdoor passwords (AMI, Award, Phoenix, Dell, IBM/Lenovo, Toshiba, Samsung, HP/Compaq, and others). Phase 2 tries the most common user-set BIOS passwords. Every attempt is logged with a timestamp to /loot/bios-bruteforce/attempts.log. The Bash Bunny has no screen visibility: the operator watches the target display and pulls the Bunny when the BIOS unlocks, then checks the log to identify which password succeeded. Configurable lockout pause (default: 3 attempts then 10s pause). Hard-capped at 5 minutes runtime. LED states: GREEN=active, YELLOW=lockout pause, RED=budget exhausted, CYAN=complete.",
+      "path": "payloads/bash_bunny/bios-password-bruteforce/payload.txt",
+      "added": "2026-09-09T00:00:00Z"
     }
   ],
   "usb_rubber_ducky": [
