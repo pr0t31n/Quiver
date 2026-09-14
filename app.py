@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.27.1"
+VERSION = "1.27.2"
 
 import concurrent.futures
 import ipaddress
@@ -80,6 +80,7 @@ PAYLOAD_JSON = PAYLOAD_DIR / "payloads.json"
 
 app = Flask(__name__)
 app.config["SECRET_KEY"]               = _auth.load_secret_key()
+app.config["SESSION_COOKIE_NAME"]      = "quiver_session"
 app.config["SESSION_COOKIE_SECURE"]    = False  # self-signed cert; HTTPS enforced server-side
 app.config["SESSION_COOKIE_HTTPONLY"]  = True
 app.config["SESSION_COOKIE_SAMESITE"]  = "Lax"
