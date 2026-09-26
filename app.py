@@ -12,7 +12,7 @@ Shell types supported:
   none      — no interactive shell (libusb-only devices with no CLI)
 """
 
-VERSION = "1.27.2"
+VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
 
 import concurrent.futures
 import ipaddress
