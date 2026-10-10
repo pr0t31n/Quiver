@@ -124,6 +124,39 @@ def zypper_install(packages):
     run(["zypper", "install", "-y"] + packages)
 
 # ---------------------------------------------------------------------------
+# pip pre-check
+# ---------------------------------------------------------------------------
+def _pip_installed(pkg_spec):
+    import importlib.util
+    name = pkg_spec.split(">=")[0].split("==")[0].split("[")[0].split("<")[0].strip()
+    _IMPORT_MAP = {
+        "flask-socketio": "flask_socketio",
+        "flask-cors": "flask_cors",
+        "flask-login": "flask_login",
+        "python-engineio": "engineio",
+        "python-socketio": "socketio",
+        "python-dotenv": "dotenv",
+        "pyyaml": "yaml",
+        "pyserial": "serial",
+        "pyusb": "usb",
+        "websocket-client": "websocket",
+        "pyflipper": "pyflipper",
+        "flipperzero-protobuf": "flipperzero_protobuf",
+        "pyhackrf": "pyhackrf",
+        "zigpy-znp": "zigpy_znp",
+        "universal-silabs-flasher": "universal_silabs_flasher",
+        "apollo-fpga": "apollo_fpga",
+        "pylink-square": "pylink",
+        "pyocd": "pyocd",
+    }
+    mod = _IMPORT_MAP.get(name, name.replace("-", "_"))
+    try:
+        return importlib.util.find_spec(mod) is not None
+    except (ModuleNotFoundError, ValueError):
+        return False
+
+
+# ---------------------------------------------------------------------------
 # pip
 # ---------------------------------------------------------------------------
 PIP_PACKAGES = [
@@ -155,7 +188,16 @@ PIP_PACKAGES = [
 
 def install_pip():
     banner("Phase: pip packages")
-    run([sys.executable, "-m", "pip", "install", "--break-system-packages"] + PIP_PACKAGES, check=False)
+    pip_cmd = [sys.executable, "-m", "pip"]
+    for pkg in PIP_PACKAGES:
+        if _pip_installed(pkg):
+            info(f"  ✓ {pkg} already installed")
+            continue
+        info(f"pip install {pkg} …")
+        try:
+            run(pip_cmd + ["install", "--break-system-packages", pkg], check=False)
+        except Exception as exc:
+            warn(f"pip install failed for {pkg}: {exc}")
 
 # ---------------------------------------------------------------------------
 # System packages
