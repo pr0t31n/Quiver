@@ -26,6 +26,7 @@ W  = "\033[0m"
 def banner(msg):  print(f"\n{B}{'='*60}{W}\n{C}  {msg}{W}\n{B}{'='*60}{W}")
 def info(msg):    print(f"{G}[+]{W} {msg}")
 def warn(msg):    print(f"{Y}[!]{W} {msg}")
+def note(msg):    print(f"{Y}[i]{W} {msg}")
 def error(msg):   print(f"{R}[x]{W} {msg}")
 def step(msg):    print(f"{B}[>]{W} {msg}")
 
@@ -86,7 +87,7 @@ def brew_install(pkg, cask=False):
                 brew_path = p
                 break
     if not brew_path:
-        warn(f"brew not found — skipping {pkg}")
+        note(f"brew not found — skipping {pkg}")
         return
 
     cmd = [brew_path, "install"]
@@ -97,7 +98,7 @@ def brew_install(pkg, cask=False):
     if is_root():
         sudo_user = get_sudo_user()
         if not sudo_user:
-            warn(f"Running as root with no SUDO_USER — cannot run brew safely. Skipping {pkg}.")
+            note(f"Running as root with no SUDO_USER — cannot run brew safely. Skipping {pkg}.")
             return
         cmd = ["sudo", "-u", sudo_user] + cmd
 
@@ -279,9 +280,9 @@ def install_system():
         for cask in BREW_CASKS:
             brew_install(cask, cask=True)
     elif OS == "windows":
-        warn("Windows detected — system package installation not supported. Install tools manually.")
+        note("Windows detected — system package installation not supported. Install tools manually.")
     else:
-        warn(f"Unknown OS '{OS}' — skipping system packages.")
+        note(f"Unknown OS '{OS}' — skipping system packages.")
     print_ti_toolchain_notice()
 
 # ---------------------------------------------------------------------------
@@ -414,7 +415,7 @@ def install_service():
             info(f"Service {SVC_NAME} enabled.")
             info(f"Start with: systemctl start {SVC_NAME}")
         except PermissionError:
-            warn("Not root — cannot write systemd unit. Run as root to install service.")
+            note("Not root — cannot write systemd unit. Run as root to install service.")
     elif OS == "macos":
         path = "/Library/LaunchDaemons/com.pr0t31n.quiver.plist"
         try:
@@ -425,9 +426,9 @@ def install_service():
             info(f"LaunchDaemon loaded.")
             info(f"Start with: launchctl start com.pr0t31n.quiver")
         except PermissionError:
-            warn("Not root — cannot write LaunchDaemon plist. Run as root to install service.")
+            note("Not root — cannot write LaunchDaemon plist. Run as root to install service.")
     else:
-        warn("Service installation not supported on this OS.")
+        note("Service installation not supported on this OS.")
 
 # ---------------------------------------------------------------------------
 # Check / verify
@@ -503,22 +504,22 @@ def main():
     if not args.skip_system:
         install_system()
     else:
-        skips.add("system"); warn("Skipping system packages.")
+        skips.add("system"); note("Skipping system packages.")
 
     if not args.skip_pip:
         install_pip()
     else:
-        skips.add("pip"); warn("Skipping pip packages.")
+        skips.add("pip"); note("Skipping pip packages.")
 
     if not args.skip_go:
         install_go()
     else:
-        skips.add("go"); warn("Skipping go tools.")
+        skips.add("go"); note("Skipping go tools.")
 
     if not args.skip_git:
         install_git()
     else:
-        skips.add("git"); warn("Skipping git tools.")
+        skips.add("git"); note("Skipping git tools.")
 
     install_service()
     run_check()
