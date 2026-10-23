@@ -55,6 +55,26 @@ def detect_os():
 
 OS = detect_os()
 
+
+def _read_os_release() -> dict:
+    d = {}
+    try:
+        with open("/etc/os-release") as f:
+            for line in f:
+                line = line.strip()
+                if "=" not in line: continue
+                k, _, v = line.partition("=")
+                d[k.lower()] = v.strip('"').strip("'")
+    except FileNotFoundError:
+        pass
+    return d
+
+_OS_RELEASE = _read_os_release()
+
+def is_kali() -> bool:
+    return "kali" in _OS_RELEASE.get("id", "").lower()
+
+
 # ---------------------------------------------------------------------------
 # Privilege helpers
 # ---------------------------------------------------------------------------
@@ -109,6 +129,16 @@ def brew_install(pkg, cask=False):
 # ---------------------------------------------------------------------------
 _apt_updated = False
 
+
+def _dpkg_installed(pkg):
+    try:
+        r = subprocess.run(["dpkg", "-s", pkg],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return r.returncode == 0
+    except FileNotFoundError:
+        return False
+
+
 def apt_install(packages):
     global _apt_updated
     if not _apt_updated:
@@ -117,6 +147,25 @@ def apt_install(packages):
         run(["apt-get", "upgrade", "-y"])
         _apt_updated = True
     run(["apt-get", "install", "-y"] + packages)
+
+
+def apt_install_optional(packages):
+    global _apt_updated
+    if not _apt_updated:
+        info("Running apt-get update ...")
+        run(["apt-get", "update", "-y"])
+        _apt_updated = True
+    for pkg in packages:
+        if _dpkg_installed(pkg):
+            info(f"  ✓ {pkg} already installed")
+            continue
+        r = subprocess.run(["apt-get", "install", "-y", pkg],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        if r.returncode == 0:
+            info(f"  ✓ {pkg} installed")
+        else:
+            warn(f"  {pkg} not available — skipping (install manually if needed)")
+
 
 def dnf_install(packages):
     run(["dnf", "install", "-y"] + packages)
@@ -204,14 +253,21 @@ def install_pip():
 # System packages
 # ---------------------------------------------------------------------------
 APT_PACKAGES = [
-    "hackrf", "ubertooth", "stlink-tools", "proxmark3",
+    "stlink-tools",
     "libusb-1.0-0-dev", "libusb-dev",
     "git", "python3-pip", "python3-dev",
     "gcc-arm-none-eabi",   # build Sniffle firmware for CC1352P-4 (PLATFORM=CC1352P_4)
     "openocd",             # open-source XDS110 flasher for the TI LaunchPads
     "tshark", "wireshark-common",  # BLE capture (nRF Sniffer extcap) + pcap tooling
-    "crackle",             # BLE legacy pairing PIN/TK cracker (Kali/Debian package)
     "libpcap-dev",         # crackle build dependency (git fallback)
+]
+
+# Kali-only packages — available in Kali repos but not standard Ubuntu/Debian
+APT_PACKAGES_KALI = [
+    "hackrf",      # HackRF One SDR tools
+    "ubertooth",   # Ubertooth One Bluetooth sniffer tools
+    "proxmark3",   # Proxmark3 RFID/NFC reader/writer tools
+    "crackle",     # BLE legacy pairing PIN/TK cracker
 ]
 DNF_PACKAGES = [
     "hackrf", "ubertooth", "stlink", "libusb-devel",
@@ -269,6 +325,12 @@ def install_system():
     banner("Phase: system packages")
     if OS == "apt":
         apt_install(APT_PACKAGES)
+        if is_kali():
+            info("Installing Kali-specific hardware packages…")
+            apt_install_optional(APT_PACKAGES_KALI)
+        else:
+            warn("Hardware-specific packages (hackrf, ubertooth, proxmark3, crackle) are only available in Kali repos.")
+            note("On other distros, install from source or see tool documentation.")
     elif OS == "dnf":
         dnf_install(DNF_PACKAGES)
     elif OS == "zypper":
