@@ -14,3 +14,6 @@ xds110_boards.json
 # Python bytecode
 __pycache__/
 *.pyc
+ssl.key
+ssl.crt
+.auth.json
