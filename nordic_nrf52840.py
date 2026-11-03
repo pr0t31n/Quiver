@@ -1434,7 +1434,7 @@ def op_ble_mitm():
     info("")
     info("RUN (once ButteRFly is flashed and WHAD is installed):")
     info("  Confirm the board is seen as a WHAD interface:  whadup")
-    info("  Passively recover a LEGACY pairing PIN (the BLE passkey workflow):")
+    info("  Passively recover a LEGACY pairing PIN:")
     info("    wsniff -i <iface> ble --pcap capture.pcap | wanalyze legacy_pairing_cracking")
     info("  Full active relay: use WHAD's BLE MITM tooling, or the project's")
     info("  ble-connect.py / ble-spawn.py proxy driven by the recovered PIN.")
