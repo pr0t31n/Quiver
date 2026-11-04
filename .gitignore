@@ -17,3 +17,6 @@ __pycache__/
 ssl.key
 ssl.crt
 .auth.json
+
+# Backups
+*.bak*
