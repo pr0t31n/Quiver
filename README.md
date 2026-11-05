@@ -6,6 +6,9 @@ Quiver abstracts the CLI complexity of dozens of physical tools into a single we
 
 ---
 
+
+> **[View full documentation on the Codex Wiki](https://wiki.pr0t31n.com/tools/quiver)** — detailed features, CLI reference, findings catalogue, and integration guides.
+
 ## Features
 
 - **45-device registry** — every tool has a named entry with detection credentials, shell type, USB VID/PIDs, default SSH host, and optional web UI link; 8 category groups for navigation
