@@ -539,6 +539,26 @@ def print_summary(skips):
     warn("Ensure /opt/pr0t31n/Quiver/app.py exists before starting the service.")
 
 # ---------------------------------------------------------------------------
+# Prerequisite check
+# ---------------------------------------------------------------------------
+def _check_prereqs():
+    REQUIRED = [
+        ("git",  "git — required for cloning dependencies"),
+        ("pip3", "pip3 — required for Python packages (apt: python3-pip)"),
+    ]
+    missing = []
+    for binary, desc in REQUIRED:
+        if not shutil.which(binary):
+            missing.append(f"  ✗ {binary}  ({desc})")
+    if missing:
+        print("\nERROR: Missing required prerequisites:\n")
+        for m in missing:
+            print(m)
+        print("\nInstall them first, then re-run install.py.\n")
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -549,6 +569,8 @@ def main():
     parser.add_argument("--skip-git",    action="store_true")
     parser.add_argument("--check",       action="store_true", help="Verify installation only")
     args = parser.parse_args()
+
+    _check_prereqs()
 
     banner("Quiver — Pentest Hardware Manager — Installer")
     info(f"Detected OS : {OS}")
