@@ -11,6 +11,7 @@ Shell types supported:
   websocket — WebSocket relay (WiFi Duck ws://192.168.4.1/ws)
   none      — no interactive shell (libusb-only devices with no CLI)
 """
+from pathlib import Path
 
 VERSION = Path(__file__).resolve().parent.joinpath("VERSION").read_text().strip()
 
@@ -28,7 +29,6 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone, timedelta
-from pathlib import Path
 from typing import Optional
 
 # ── Optional imports ────────────────────────────────────────────────────────────
